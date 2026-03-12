@@ -3,7 +3,7 @@ import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocum
 import MarkdownRenderer from './components/MarkdownRenderer';
 import './index.css';
 
-type Mode = 'memory' | 'chat' | 'settings' | 'admin';
+type Mode = 'memory' | 'chat' | 'config';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -116,6 +116,7 @@ function App() {
   const [originalDocPaths, setOriginalDocPaths] = useState<string[]>([]);
   const [newDocPath, setNewDocPath] = useState('');
   const [adminMessage, setAdminMessage] = useState('');
+  const [docSearch, setDocSearch] = useState('');
   const [confirm, setConfirm] = useState<ConfirmDialog>({ visible: false, title: '', message: '', onConfirm: () => {} });
   const [exporting, setExporting] = useState(false);
 
@@ -137,7 +138,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (mode === 'admin') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
+    if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
   }, [mode]);
 
   const loadLLMConfig = async () => {
@@ -429,7 +430,7 @@ function App() {
   };
 
   const modeLabels: Record<Mode, string> = {
-    chat: '💬 对话', memory: '💾 记忆', settings: '⚙️ 设置', admin: '🗄 管理',
+    chat: '💬 对话', memory: '💾 记忆', config: '⚙️ 配置',
   };
 
   const actionBtn = (onClick: () => void, children: React.ReactNode, label: string) => (
@@ -588,12 +589,28 @@ function App() {
       {mode !== 'chat' && (
         <main className="flex-1 flex flex-col items-center px-8 py-8">
 
-          {/* Settings */}
-          {mode === 'settings' && (
-            <div className="w-full max-w-2xl space-y-6">
+          {/* Config (merged Settings + Admin) */}
+          {mode === 'config' && (
+            <div className="w-full max-w-4xl space-y-6">
+
+              {/* Stats Cards */}
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: '文档总数', value: statsLoading ? '...' : dbStats?.document_count ?? '-', icon: '📄' },
+                  { label: '向量块总数', value: statsLoading ? '...' : dbStats?.chunk_count ?? '-', icon: '🧩' },
+                  { label: '数据库大小', value: statsLoading ? '...' : dbStats?.db_size ?? '-', icon: '💾' },
+                ].map((card) => (
+                  <div key={card.label} className="bg-white rounded-2xl p-6 shadow-md text-center">
+                    <div className="text-3xl mb-2">{card.icon}</div>
+                    <div className="text-2xl font-bold text-gray-900">{card.value}</div>
+                    <div className="text-sm text-gray-500 mt-1">{card.label}</div>
+                  </div>
+                ))}
+              </div>
+
               {/* LLM Config */}
               <div className="bg-white rounded-2xl p-8 shadow-md">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">云端大模型配置</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-5">大模型配置</h2>
                 <div className="space-y-4">
                   {[
                     { label: 'API Base URL', key: 'base_url', type: 'text', placeholder: '例如: https://ark.cn-beijing.volces.com/api/v3' },
@@ -611,12 +628,23 @@ function App() {
                   <button onClick={handleSaveLLMConfig}
                     className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
                   {llmConfigured && <div className="text-sm text-green-600 text-center">✓ LLM 已配置</div>}
+                  {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
                 </div>
               </div>
 
               {/* Embedding Config */}
               <div className="bg-white rounded-2xl p-8 shadow-md">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">嵌入模型配置</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-5">嵌入模型配置</h2>
+                {dbStats && (
+                  <div className="flex items-center gap-3 mb-5 pb-5 border-b border-gray-100">
+                    <span className="text-sm text-gray-500">当前使用：</span>
+                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                      {dbStats.embedding_provider === 'local' ? '本地模型' :
+                       dbStats.embedding_provider === 'doubao' ? '豆包 Embedding' : '云端 API'}
+                    </span>
+                    <span className="text-gray-700 font-mono text-sm">{dbStats.embedding_model}</span>
+                  </div>
+                )}
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">模型提供商</label>
@@ -681,7 +709,7 @@ function App() {
                   )}
 
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                    <p className="text-sm text-amber-800">⚠️ 更换嵌入模型后，需要在「管理」页重置知识库并重新上传文档，否则新旧向量不兼容</p>
+                    <p className="text-sm text-amber-800">⚠️ 更换嵌入模型后，需要重置知识库并重新上传文档，否则新旧向量不兼容</p>
                   </div>
 
                   <button onClick={handleSaveEmbeddingConfig}
@@ -689,7 +717,153 @@ function App() {
                 </div>
               </div>
 
-              {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
+              {/* 原始文档搜索路径 */}
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
+                <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={newDocPath}
+                    onChange={(e) => setNewDocPath(e.target.value)}
+                    placeholder="输入本地路径，如 /Users/yzc/docs"
+                    className="flex-1 px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
+                  />
+                  <button
+                    onClick={handleAddDocPath}
+                    disabled={!newDocPath.trim()}
+                    className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    添加
+                  </button>
+                </div>
+                {originalDocPaths.length === 0 ? (
+                  <p className="text-sm text-gray-400">尚未配置搜索路径</p>
+                ) : (
+                  <div className="space-y-2">
+                    {originalDocPaths.map((path) => (
+                      <div key={path} className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-lg">
+                        <span className="text-sm text-gray-700 font-mono truncate flex-1">{path}</span>
+                        <button
+                          onClick={() => handleRemoveDocPath(path)}
+                          className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {dbStats && Object.keys(dbStats.type_counts).length > 0 && (
+                <div className="bg-white rounded-2xl p-6 shadow-md">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">文档类型分布</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {Object.entries(dbStats.type_counts).map(([type, count]) => (
+                      <span key={type} className="px-4 py-2 bg-gray-100 rounded-full text-sm text-gray-700">
+                        {fileTypeLabel[type] || type}：{count} 篇
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button onClick={loadDbStats}
+                  className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors text-sm font-medium">
+                  🔄 刷新统计
+                </button>
+                <button onClick={handleExport}
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium">
+                  📥 导出备份
+                </button>
+                <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
+                  📤 导入备份
+                  <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                </label>
+                <button onClick={handleReset}
+                  className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium ml-auto">
+                  🗑 重置知识库
+                </button>
+              </div>
+
+              {adminMessage && (
+                <div className={`text-sm px-4 py-3 rounded-xl whitespace-pre-wrap ${adminMessage.includes('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  {adminMessage}
+                </div>
+              )}
+
+              <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-4">
+                  <h3 className="text-lg font-bold text-gray-900 shrink-0">
+                    文档列表（{docSearch.trim()
+                      ? `${documents.filter(d => d.title.toLowerCase().includes(docSearch.toLowerCase())).length} / ${documents.length}`
+                      : documents.length} 篇）
+                  </h3>
+                  <input
+                    type="text"
+                    value={docSearch}
+                    onChange={(e) => setDocSearch(e.target.value)}
+                    placeholder="搜索文档名..."
+                    className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:border-gray-400 outline-none"
+                  />
+                  {docSearch && (
+                    <button onClick={() => setDocSearch('')} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">清除</button>
+                  )}
+                </div>
+                {documents.length === 0 ? (
+                  <div className="text-center text-gray-400 py-12">暂无文档</div>
+                ) : (() => {
+                  const filtered = docSearch.trim()
+                    ? documents.filter(d => d.title.toLowerCase().includes(docSearch.toLowerCase()))
+                    : documents;
+                  return filtered.length === 0 ? (
+                    <div className="text-center text-gray-400 py-12">无匹配文档</div>
+                  ) : (
+                    <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                      {filtered.map((doc) => {
+                        const kw = docSearch.trim().toLowerCase();
+                        const title = doc.title;
+                        const idx = kw ? title.toLowerCase().indexOf(kw) : -1;
+                        return (
+                          <div key={doc.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <span className="text-gray-400 text-xs w-8 shrink-0">#{doc.id}</span>
+                              <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                                doc.file_type === 'markdown' ? 'bg-blue-100 text-blue-700' :
+                                doc.file_type === 'pdf' ? 'bg-red-100 text-red-700' :
+                                doc.file_type === 'word' ? 'bg-indigo-100 text-indigo-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>
+                                {doc.file_type === 'markdown' ? 'MD' :
+                                 doc.file_type === 'pdf' ? 'PDF' :
+                                 doc.file_type === 'word' ? 'DOC' : 'TXT'}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-gray-800 text-sm truncate">
+                                  {idx >= 0 ? (
+                                    <>
+                                      {title.slice(0, idx)}
+                                      <mark className="bg-yellow-200 text-gray-900 rounded px-0.5">{title.slice(idx, idx + kw.length)}</mark>
+                                      {title.slice(idx + kw.length)}
+                                    </>
+                                  ) : title}
+                                </p>
+                                <p className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleString()}</p>
+                              </div>
+                            </div>
+                            <button onClick={() => handleDeleteDocument(doc)}
+                              className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
+                              删除
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           )}
 
@@ -834,160 +1008,11 @@ function App() {
             </div>
           )}
 
-          {/* Admin Mode */}
-          {mode === 'admin' && (
-            <div className="w-full max-w-4xl space-y-6">
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { label: '文档总数', value: statsLoading ? '...' : dbStats?.document_count ?? '-', icon: '📄' },
-                  { label: '向量块总数', value: statsLoading ? '...' : dbStats?.chunk_count ?? '-', icon: '🧩' },
-                  { label: '数据库大小', value: statsLoading ? '...' : dbStats?.db_size ?? '-', icon: '💾' },
-                ].map((card) => (
-                  <div key={card.label} className="bg-white rounded-2xl p-6 shadow-md text-center">
-                    <div className="text-3xl mb-2">{card.icon}</div>
-                    <div className="text-2xl font-bold text-gray-900">{card.value}</div>
-                    <div className="text-sm text-gray-500 mt-1">{card.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              {dbStats && (
-                <div className="bg-white rounded-2xl p-6 shadow-md">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Embedding 模型</h3>
-                  <div className="flex items-center gap-3">
-                    <span className="px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
-                      {dbStats.embedding_provider === 'local' ? '本地模型' :
-                       dbStats.embedding_provider === 'doubao' ? '豆包 Embedding' :
-                       '云端 API'}
-                    </span>
-                    <span className="text-gray-700 font-mono text-sm">{dbStats.embedding_model}</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-3">
-                    ⚠️ 导入备份时会自动检查 embedding 模型是否匹配
-                  </p>
-                </div>
-              )}
-
-              {/* 原始文档搜索路径 */}
-              <div className="bg-white rounded-2xl p-6 shadow-md">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
-                <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    value={newDocPath}
-                    onChange={(e) => setNewDocPath(e.target.value)}
-                    placeholder="输入本地路径，如 /Users/yzc/docs"
-                    className="flex-1 px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
-                  />
-                  <button
-                    onClick={handleAddDocPath}
-                    disabled={!newDocPath.trim()}
-                    className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    添加
-                  </button>
-                </div>
-                {originalDocPaths.length === 0 ? (
-                  <p className="text-sm text-gray-400">尚未配置搜索路径</p>
-                ) : (
-                  <div className="space-y-2">
-                    {originalDocPaths.map((path) => (
-                      <div key={path} className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-lg">
-                        <span className="text-sm text-gray-700 font-mono truncate flex-1">{path}</span>
-                        <button
-                          onClick={() => handleRemoveDocPath(path)}
-                          className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {dbStats && Object.keys(dbStats.type_counts).length > 0 && (
-                <div className="bg-white rounded-2xl p-6 shadow-md">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">文档类型分布</h3>
-                  <div className="flex flex-wrap gap-3">
-                    {Object.entries(dbStats.type_counts).map(([type, count]) => (
-                      <span key={type} className="px-4 py-2 bg-gray-100 rounded-full text-sm text-gray-700">
-                        {fileTypeLabel[type] || type}：{count} 篇
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button onClick={loadDbStats}
-                  className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors text-sm font-medium">
-                  🔄 刷新统计
-                </button>
-                <button onClick={handleExport}
-                  className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium">
-                  📥 导出备份
-                </button>
-                <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
-                  📤 导入备份
-                  <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-                </label>
-                <button onClick={handleReset}
-                  className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium ml-auto">
-                  🗑 重置知识库
-                </button>
-              </div>
-
-              {adminMessage && (
-                <div className={`text-sm px-4 py-3 rounded-xl whitespace-pre-wrap ${adminMessage.includes('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                  {adminMessage}
-                </div>
-              )}
-
-              <div className="bg-white rounded-2xl shadow-md overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100">
-                  <h3 className="text-lg font-bold text-gray-900">文档列表（{documents.length} 篇）</h3>
-                </div>
-                {documents.length === 0 ? (
-                  <div className="text-center text-gray-400 py-12">暂无文档</div>
-                ) : (
-                  <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
-                    {documents.map((doc) => (
-                      <div key={doc.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <span className="text-gray-400 text-xs w-8 shrink-0">#{doc.id}</span>
-                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                            doc.file_type === 'markdown' ? 'bg-blue-100 text-blue-700' :
-                            doc.file_type === 'pdf' ? 'bg-red-100 text-red-700' :
-                            doc.file_type === 'word' ? 'bg-indigo-100 text-indigo-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
-                            {doc.file_type === 'markdown' ? 'MD' :
-                             doc.file_type === 'pdf' ? 'PDF' :
-                             doc.file_type === 'word' ? 'DOC' : 'TXT'}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-gray-800 text-sm truncate">{doc.title}</p>
-                            <p className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleString()}</p>
-                          </div>
-                        </div>
-                        <button onClick={() => handleDeleteDocument(doc)}
-                          className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
-                          删除
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </main>
       )}
 
       {/* ===== Bottom Input (chat / search) ===== */}
-      {mode !== 'settings' && mode !== 'memory' && mode !== 'admin' && (
+      {mode !== 'config' && mode !== 'memory' && (
         <div className="fixed bottom-0 left-0 right-0 bg-gray-50/95 backdrop-blur border-t border-gray-200 p-4">
           <div className="max-w-4xl mx-auto">
             <form onSubmit={getSubmitHandler()}>

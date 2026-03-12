@@ -1,0 +1,665 @@
+import React, { useState, useEffect } from 'react';
+import { uploadFile, searchDocuments, saveText, chatWithRAG, configureLLM, getLLMConfig, uploadDirectory, getDocuments } from './services/api';
+import './index.css';
+
+type Mode = 'memory' | 'search' | 'chat' | 'settings';
+
+interface SearchResult {
+  chunk_id: number;
+  document_id: number;
+  content: string;
+  similarity: number;
+  chunk_index: number;
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  sources?: any[];
+}
+
+interface LLMConfig {
+  provider: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+function App() {
+  const [mode, setMode] = useState<Mode>('search');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatting, setChatting] = useState(false);
+  const [useRag, setUseRag] = useState(false); // 默认不使用 RAG，直接对话
+  // 从 localStorage 加载保存的配置
+  const getSavedConfig = (): LLMConfig => {
+    const saved = localStorage.getItem('llm_config');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        // 解析失败，使用默认配置
+      }
+    }
+    return {
+      provider: 'custom',
+      model: 'doubao-seed-2-0-pro-260215',
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      api_key: ''
+    };
+  };
+
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(getSavedConfig());
+  const [llmConfigured, setLlmConfigured] = useState(false);
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [uploadLogs, setUploadLogs] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  
+
+  useEffect(() => {
+    // 加载 LLM 配置
+    loadLLMConfig();
+    loadDocuments();
+    
+    // 应用保存的 LLM 配置
+    const savedConfig = localStorage.getItem('llm_config');
+    if (savedConfig) {
+      try {
+        const config = JSON.parse(savedConfig);
+        configureLLM(config).catch(console.error);
+      } catch {
+        // 解析失败，忽略
+      }
+    }
+  }, []);
+
+  const loadLLMConfig = async () => {
+    try {
+      const config = await getLLMConfig();
+      setLlmConfigured(config.configured);
+    } catch (error) {
+      console.error('加载配置失败:', error);
+    }
+  }
+
+  const loadDocuments = async () => {
+    try {
+      const data = await getDocuments();
+      setDocuments(data.documents || []);
+    } catch (error) {
+      console.error('加载文档失败:', error);
+    }
+  };
+
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+
+    setSearching(true);
+    setMessage('');
+    try {
+      const data = await searchDocuments(query);
+      setResults(data.results);
+      if (data.results.length === 0) {
+        setMessage('没有找到相关结果');
+      }
+    } catch (error: any) {
+      setMessage(`搜索失败: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: query
+    };
+    setChatMessages(prev => [...prev, userMessage]);
+    setQuery('');
+    setChatting(true);
+
+    try {
+      const response = await chatWithRAG(userMessage.content, 5, useRag);
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: response.answer,
+        sources: response.sources
+      };
+      setChatMessages(prev => [...prev, assistantMessage]);
+    } catch (error: any) {
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: `抱歉，对话失败: ${error.response?.data?.detail || error.message}`
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setChatting(false);
+    }
+  };
+
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+
+    setUploading(true);
+    setMessage('');
+    setResults([]);
+
+    try {
+      const result = await saveText(query);
+      setMessage(`✓ 保存成功: ${result.title}`);
+      setQuery('');
+    } catch (error: any) {
+      setMessage(`✗ 保存失败: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      await handleUpload(files[0]);
+    }
+  };
+
+  const handleUpload = async (file: File) => {
+    setUploading(true);
+    setMessage('');
+    setResults([]);
+
+    try {
+      const result = await uploadFile(file);
+      setMessage(`✓ 上传成功: ${result.title}`);
+      setQuery('');
+    } catch (error: any) {
+      setMessage(`✗ 上传失败: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSaveLLMConfig = async () => {
+    try {
+      // 先保存到后端
+      await configureLLM(llmConfig);
+      // 保存到 localStorage
+      localStorage.setItem('llm_config', JSON.stringify(llmConfig));
+      setMessage('✓ LLM 配置保存成功');
+      setLlmConfigured(true);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error: any) {
+      setMessage(`✗ 配置失败: ${error.response?.data?.detail || error.message}`);
+    }
+  };
+
+  const getSubmitHandler = () => {
+    if (mode === 'search') return handleSearch;
+    if (mode === 'chat') return handleChat;
+    return handleTextSubmit;
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Main Content - Centered */}
+      <main className="flex-1 flex flex-col items-center justify-center px-8 pb-4">
+        {/* Title */}
+        <h1 className="text-5xl font-bold text-gray-900 mb-12">Memory</h1>
+
+        {/* Mode Toggle */}
+        <div className="flex gap-3 mb-12">
+          <button
+            onClick={() => setMode('search')}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
+              mode === 'search'
+                ? 'bg-gray-900 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            🔍 查询
+          </button>
+          <button
+            onClick={() => setMode('chat')}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
+              mode === 'chat'
+                ? 'bg-gray-900 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            💬 对话
+          </button>
+          <button
+            onClick={() => setMode('memory')}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
+              mode === 'memory'
+                ? 'bg-gray-900 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            💾 记忆
+          </button>
+          <button
+            onClick={() => setMode('settings')}
+            className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
+              mode === 'settings'
+                ? 'bg-gray-900 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            ⚙️ 设置
+          </button>
+        </div>
+
+        {/* Settings Page */}
+        {mode === 'settings' && (
+          <div className="w-full max-w-2xl bg-white rounded-2xl p-8 shadow-md">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">云端大模型配置</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  API Base URL
+                </label>
+                <input
+                  type="text"
+                  value={llmConfig.base_url || ''}
+                  onChange={(e) => setLlmConfig({...llmConfig, base_url: e.target.value})}
+                  placeholder="例如: https://ark.cn-beijing.volces.com/api/v3"
+                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  API Key
+                </label>
+                <input
+                  type="password"
+                  value={llmConfig.api_key || ''}
+                  onChange={(e) => setLlmConfig({...llmConfig, api_key: e.target.value})}
+                  placeholder="输入 API Key"
+                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  模型名称
+                </label>
+                <input
+                  type="text"
+                  value={llmConfig.model || ''}
+                  onChange={(e) => setLlmConfig({...llmConfig, model: e.target.value})}
+                  placeholder="例如: doubao-pro-4k, gpt-4o, qwen-plus"
+                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none"
+                />
+              </div>
+
+              <button
+                onClick={handleSaveLLMConfig}
+                className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+              >
+                保存配置
+              </button>
+
+              {llmConfigured && (
+                <div className="text-sm text-green-600 text-center">
+                  ✓ LLM 已配置
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Chat Messages */}
+        {mode === 'chat' && chatMessages.length > 0 && (
+          <div className="w-full max-w-4xl mb-8 space-y-4">
+            {chatMessages.map((msg, index) => (
+              <div
+                key={index}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-3xl rounded-2xl p-6 ${
+                    msg.role === 'user'
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-white text-gray-800 shadow-md'
+                  }`}
+                >
+                  <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <p className="text-xs text-gray-500 mb-2">参考来源：</p>
+                      {msg.sources.map((source, idx) => (
+                        <div key={idx} className="text-xs text-gray-600 mb-1">
+                          • 文档 #{source.document_id} ({(source.similarity * 100).toFixed(0)}% 匹配)
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Search Results */}
+        {mode === 'search' && results.length > 0 && (
+          <div className="w-full max-w-4xl mb-8 space-y-3">
+            <div className="text-sm text-gray-600 mb-4">
+              找到 {results.length} 个相关结果
+            </div>
+            {results.map((result, index) => (
+              <div
+                key={result.chunk_id}
+                className="bg-white rounded-2xl p-6 hover:shadow-md transition-shadow"
+              >
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 bg-gray-900 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                      {index + 1}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      文档 #{result.document_id}
+                    </span>
+                  </div>
+                  <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs">
+                    {(result.similarity * 100).toFixed(0)}% 匹配
+                  </span>
+                </div>
+                <p className="text-gray-800 leading-relaxed">{result.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+
+        {/* Memory Mode Panel */}
+        {mode === 'memory' && (
+          <div className="w-full max-w-4xl space-y-6">
+            {/* Upload Section */}
+            <div className="bg-white rounded-2xl p-6 shadow-md">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">上传 Markdown 文档</h3>
+              
+              {/* Single File Upload */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">单个 Markdown 文件</label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="file"
+                    id="md-file-upload"
+                    accept=".md"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleUpload(e.target.files[0]);
+                      }
+                    }}
+                    disabled={uploading}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+                  />
+                </div>
+              </div>
+
+              {/* Directory Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">批量上传 Markdown 目录</label>
+                <input
+                  type="file"
+                  id="directory-upload"
+                  webkitdirectory=""
+                  directory=""
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (files && files.length > 0) {
+                      // 获取目录路径
+                      const directoryPath = files[0].webkitRelativePath.split('/')[0];
+                      setUploading(true);
+                      console.log('开始上传，目录:', directoryPath);
+                      setUploadLogs([`正在连接服务器...`]);
+                      setUploadProgress(0);
+                      setUploadTotal(0);
+                      
+                      // 使用 EventSource 直接连接后端
+                      const eventSource = new EventSource('http://localhost:8001/api/v1/documents/upload-directory?directory_path=' + encodeURIComponent(directoryPath));
+                      
+                      eventSource.onmessage = (event) => {
+                        try {
+                          const data = JSON.parse(event.data);
+                          
+                          if (data.type === 'start') {
+                            setUploadTotal(data.total);
+                            setUploadLogs(prev => [...prev, data.message]);
+                          } else if (data.type === 'progress') {
+                            setUploadProgress(data.current);
+                            setUploadLogs(prev => [...prev, data.message]);
+                          } else if (data.type === 'success') {
+                            setUploadLogs(prev => [...prev, data.message]);
+                          } else if (data.type === 'error') {
+                            setUploadLogs(prev => [...prev, '❌ ' + data.message]);
+                          } else if (data.type === 'complete') {
+                            setUploadProgress(data.uploaded_count);
+                            setUploadLogs(prev => [...prev, data.message]);
+                            setMessage('✓ 上传完成: ' + data.uploaded_count + ' 个文件, ' + data.total_chunks + ' 个文本块');
+                            loadDocuments();
+                            setUploading(false);
+                            eventSource.close();
+                          } else if (data.type === 'skip') {
+                            setUploadLogs(prev => [...prev, '⏭ ' + data.message]);
+                          }
+                        } catch (err) {
+                          console.error('解析消息失败:', err);
+                        }
+                      };
+                      
+                      eventSource.onerror = (error) => {
+                        setUploadLogs(prev => [...prev, '❌ 连接错误']);
+                        setUploading(false);
+                        eventSource.close();
+                      };
+                    }
+                  }}
+                  disabled={uploading}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+                />
+                <p className="text-xs text-gray-500 mt-1">点击选择文件夹，将上传文件夹中所有 Markdown 文件</p>
+              </div>
+            </div>
+
+            {/* Documents List */}
+            {documents.length > 0 && (
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">已上传文档 ({documents.length})</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {documents.map((doc) => (
+                    <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg">
+                          {doc.file_type === 'markdown' ? '📝' : doc.file_type === 'pdf' ? '📄' : '📃'}
+                        </span>
+                        <span className="text-gray-800 truncate max-w-md">{doc.title}</span>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {new Date(doc.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))
+
+
+
+                </div>
+              </div>
+            )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+
+            {/* Upload Progress */}
+            {uploading && (
+              <div className="bg-white rounded-2xl p-6 shadow-md relative z-50">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">上传进度</h3>
+                
+                {/* Progress Bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>正在处理...</span>
+                    <span>{uploadTotal > 0 ? `${uploadProgress}/${uploadTotal}` : '连接中'}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div 
+                      className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                      style={{ width: uploadTotal > 0 ? `${(uploadProgress / uploadTotal) * 100}%` : '30%' }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Logs */}
+                <div className="bg-gray-900 rounded-lg p-4 max-h-64 overflow-y-auto">
+                  <div className="font-mono text-xs text-green-400 space-y-1">
+                    {uploadLogs.map((log, index) => (
+                      <div key={index} className="whitespace-pre-wrap">{log}</div>
+                    ))}}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={
+                    mode === 'search' ? '搜索你的记忆...' :
+                    mode === 'chat' ? (useRag ? '向你的知识库提问...' : '和豆包聊天...') :
+                    '记录新的想法...'
+                  }
+                  className="w-full px-6 py-4 text-base text-gray-900 bg-transparent outline-none rounded-t-2xl"
+                  disabled={searching || uploading || chatting}
+                />
+
+                {/* Action Bar */}
+                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+                  <div className="flex items-center gap-4">
+                    {mode === 'chat' && (
+                      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useRag}
+                          onChange={(e) => setUseRag(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300"
+                        />
+                        <span>使用知识库</span>
+                      </label>
+                    )}
+                    {mode === 'memory' && (
+                      <>
+                        <input
+                          type="file"
+                          id="file-upload"
+                          className="hidden"
+                          onChange={handleFileSelect}
+                          accept=".txt,.pdf,.docx,.doc,.md,image/*,video/*"
+                          disabled={uploading}
+                        />
+                        <label
+                          htmlFor="file-upload"
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
+                        >
+                          📎 <span>上传文件</span>
+                        </label>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={(mode === 'search' ? searching : mode === 'chat' ? chatting : uploading) || !query.trim()}
+                    className="px-6 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {mode === 'search'
+                      ? (searching ? '搜索中...' : '搜索')
+                      : mode === 'chat'
+                      ? (chatting ? '思考中...' : '发送')
+                      : (uploading ? '保存中...' : '保存')
+                    }
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            {/* Footer */}
+            <div className="text-center text-xs text-gray-400 mt-4">
+              Memory v0.1.0 · 基于本地 AI 的智能笔记系统
+            </div>
+          </div>
+        </div>
+      )}
+
+        {/* Status Messages */}
+        {message && (
+          <div className={`text-sm mb-4 ${
+            message.includes('成功') ? 'text-green-600' : 'text-red-600'
+          }`}>
+            {message}
+          </div>
+        )}
+
+        {(uploading || chatting) && (
+          <div className="text-gray-600 text-sm mb-4">
+            {uploading ? '正在处理...' : '正在思考...'}
+          </div>
+        )}
+
+            {/* Upload Progress */}
+            {uploading && (
+              <div className="bg-white rounded-2xl p-6 shadow-md relative z-50">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">上传进度</h3>
+                
+                {/* Progress Bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>正在处理...</span>
+                    <span>{uploadTotal > 0 ? `${uploadProgress}/${uploadTotal}` : '连接中'}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div 
+                      className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                      style={{ width: uploadTotal > 0 ? `${(uploadProgress / uploadTotal) * 100}%` : '30%' }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Logs */}
+                <div className="bg-gray-900 rounded-lg p-4 max-h-64 overflow-y-auto">
+                  <div className="font-mono text-xs text-green-400 space-y-1">
+                    {uploadLogs.map((log, index) => (
+                      <div key={index} className="whitespace-pre-wrap">{log}</div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+      </main>
+
+      {/* Bottom Input Area - Fixed */}
+      {(mode !== 'settings' && mode !== 'memory') && (
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-50 border-t border-gray-200 p-6">
+          <div className="max-w-4xl mx-auto">
+            <form onSubmit={getSubmitHandler()}>
+              <div className="bg-white rounded-2xl border-2 border-gray-200 focus-within:border-gray-400 transition-colors">
+                <input
+
+
+    </div>
+  );
+}
+
+export default App;

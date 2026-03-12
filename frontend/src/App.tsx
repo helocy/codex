@@ -1,0 +1,1042 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath } from './services/api';
+import MarkdownRenderer from './components/MarkdownRenderer';
+import './index.css';
+
+type Mode = 'memory' | 'chat' | 'settings' | 'admin';
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  sources?: any[];
+  webSources?: any[];
+  originalDocStatus?: string;
+}
+
+interface LLMConfig {
+  provider: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+interface EmbeddingConfig {
+  provider: string;
+  model: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+interface DbStats {
+  document_count: number;
+  chunk_count: number;
+  db_size: string;
+  type_counts: Record<string, number>;
+  embedding_provider: string;
+  embedding_model: string;
+}
+
+interface ConfirmDialog {
+  visible: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+}
+
+// 图标组件
+const CopyIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const ResendIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <polyline points="1 4 1 10 7 10" />
+    <path d="M3.51 15a9 9 0 1 0 .49-4" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+
+function parseThinking(content: string): { thinking: string | null; answer: string } {
+  const fullMatch = content.match(/^<think>([\s\S]*?)<\/think>\s*([\s\S]*)$/);
+  if (fullMatch) {
+    return { thinking: fullMatch[1].trim(), answer: fullMatch[2].trim() };
+  }
+  const openMatch = content.match(/^<think>([\s\S]*)$/);
+  if (openMatch) {
+    return { thinking: openMatch[1].trim(), answer: '' };
+  }
+  return { thinking: null, answer: content };
+}
+
+function App() {
+  const [mode, setMode] = useState<Mode>('chat');  // 默认显示对话界面
+  const [query, setQuery] = useState('');
+  const [textContent, setTextContent] = useState('');  // 记忆页面的文本输入
+  const [textTitle, setTextTitle] = useState('');  // 记忆页面的标题输入
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatting, setChatting] = useState(false);
+  const [useRag, setUseRag] = useState(true);  // 默认勾选知识库
+  const [useWebSearch, setUseWebSearch] = useState(false);
+  const [useOriginalDoc, setUseOriginalDoc] = useState(true);  // 默认勾选搜索原始文档
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  const getSavedConfig = (): LLMConfig => {
+    const saved = localStorage.getItem('llm_config');
+    if (saved) { try { return JSON.parse(saved); } catch {} }
+    return { provider: 'custom', model: 'doubao-seed-2-0-pro-260215', base_url: 'https://ark.cn-beijing.volces.com/api/v3', api_key: '' };
+  };
+
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(getSavedConfig());
+  const [llmConfigured, setLlmConfigured] = useState(false);
+  const [embeddingConfig, setEmbeddingConfig] = useState<EmbeddingConfig>({ provider: 'local', model: 'paraphrase-multilingual-MiniLM-L12-v2' });
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [uploadLogs, setUploadLogs] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [uploadDone, setUploadDone] = useState(false);
+  const [forceUpload, setForceUpload] = useState(false);  // 强制上传选项
+  const [overwriteUpload, setOverwriteUpload] = useState(false);  // 覆盖上传选项
+
+  const [dbStats, setDbStats] = useState<DbStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [originalDocPaths, setOriginalDocPaths] = useState<string[]>([]);
+  const [newDocPath, setNewDocPath] = useState('');
+  const [adminMessage, setAdminMessage] = useState('');
+  const [confirm, setConfirm] = useState<ConfirmDialog>({ visible: false, title: '', message: '', onConfirm: () => {} });
+  const [exporting, setExporting] = useState(false);
+
+  // 自动滚到底部
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, chatting]);
+
+  useEffect(() => {
+    loadLLMConfig();
+    loadEmbeddingConfig();
+    loadDocuments();
+    const savedConfig = localStorage.getItem('llm_config');
+    if (savedConfig) {
+      try { configureLLM(JSON.parse(savedConfig)).catch(console.error); } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'admin') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
+  }, [mode]);
+
+  const loadLLMConfig = async () => {
+    try { const c = await getLLMConfig(); setLlmConfigured(c.configured); } catch {}
+  };
+
+  const loadEmbeddingConfig = async () => {
+    try {
+      const c = await getEmbeddingConfig();
+      setEmbeddingConfig({ provider: c.provider, model: c.model, base_url: c.base_url });
+    } catch {}
+  };
+
+  const loadDocuments = async () => {
+    try { const d = await getDocuments(); setDocuments(d.documents || []); } catch {}
+  };
+
+  const loadDbStats = async () => {
+    setStatsLoading(true);
+    try { setDbStats(await getDbStats()); } catch {} finally { setStatsLoading(false); }
+  };
+
+  const loadOriginalDocPaths = async () => {
+    try {
+      const data = await getOriginalDocPaths();
+      setOriginalDocPaths(data.paths || []);
+    } catch {}
+  };
+
+  const handleAddDocPath = async () => {
+    if (!newDocPath.trim()) return;
+    try {
+      await addOriginalDocPath(newDocPath.trim());
+      setNewDocPath('');
+      loadOriginalDocPaths();
+      setAdminMessage('✓ 路径添加成功');
+    } catch (e: any) {
+      setAdminMessage('✗ ' + (e.response?.data?.detail || e.message));
+    }
+  };
+
+  const handleRemoveDocPath = async (path: string) => {
+    try {
+      await removeOriginalDocPath(path);
+      loadOriginalDocPaths();
+      setAdminMessage('✓ 路径已移除');
+    } catch (e: any) {
+      setAdminMessage('✗ ' + (e.response?.data?.detail || e.message));
+    }
+  };
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirm({ visible: true, title, message, onConfirm });
+  };
+
+  const handleCopy = (content: string, idx: number) => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx(null), 2000);
+    });
+  };
+
+  const handleResend = (content: string) => {
+    setQuery(content);
+  };
+
+  const handleDeleteDocument = (doc: any) => {
+    showConfirm('删除文档', `确定要删除「${doc.title}」吗？此操作不可撤销，相关的向量数据也将一并删除。`, async () => {
+      setConfirm(p => ({ ...p, visible: false }));
+      try {
+        await deleteDocument(doc.id);
+        setAdminMessage(`✓ 已删除文档：${doc.title}`);
+        await loadDocuments(); await loadDbStats();
+      } catch (e: any) { setAdminMessage(`✗ 删除失败：${e.response?.data?.detail || e.message}`); }
+    });
+  };
+
+  const handleReset = () => {
+    showConfirm('重置知识库', '确定要清空所有数据吗？包括全部文档和向量索引，此操作不可撤销！', async () => {
+      setConfirm(p => ({ ...p, visible: false }));
+      try {
+        await resetDatabase();
+        setAdminMessage('✓ 知识库已重置，所有数据已清空');
+        await loadDocuments(); await loadDbStats();
+      } catch (e: any) { setAdminMessage(`✗ 重置失败：${e.response?.data?.detail || e.message}`); }
+    });
+  };
+
+  const handleExport = async () => {
+    if (!dbStats) {
+      setAdminMessage('请先加载统计信息');
+      return;
+    }
+
+    const estimatedSizeMB = Math.ceil(dbStats.chunk_count * 0.05); // 每个 chunk 约 50KB
+    const estimatedMinutes = Math.ceil(dbStats.chunk_count / 100); // 约 100 chunks/分钟
+
+    showConfirm(
+      '导出数据库',
+      `即将导出 ${dbStats.document_count} 个文档和 ${dbStats.chunk_count} 个向量块。\n\n预估文件大小：约 ${estimatedSizeMB} MB\n预估耗时：约 ${estimatedMinutes} 分钟\n\n导出过程中请勿关闭页面。`,
+      async () => {
+        setConfirm(p => ({ ...p, visible: false }));
+        setExporting(true);
+        setAdminMessage('');
+        try {
+          const blob = await exportDatabase();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `memory_backup_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          setAdminMessage('✓ 数据库导出成功');
+        } catch (e: any) {
+          setAdminMessage(`✗ 导出失败：${e.response?.data?.detail || e.message}`);
+        } finally {
+          setExporting(false);
+        }
+      }
+    );
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    showConfirm('导入数据库', '导入会添加备份文件中的所有文档到当前数据库。如果需要完全恢复备份，请先重置知识库。确定要继续吗？', async () => {
+      setConfirm(p => ({ ...p, visible: false }));
+      try {
+        setAdminMessage('正在导入数据库...');
+        const result = await importDatabase(file);
+        setAdminMessage(`✓ 导入成功：${result.imported_documents} 个文档，${result.imported_chunks} 个文本块`);
+        await loadDocuments(); await loadDbStats();
+      } catch (e: any) {
+        const errorDetail = e.response?.data?.detail || e.message;
+        // 如果是 embedding 模型不匹配错误，显示完整的错误信息
+        if (errorDetail.includes('Embedding 模型不匹配')) {
+          setAdminMessage(`✗ ${errorDetail}`);
+        } else {
+          setAdminMessage(`✗ 导入失败：${errorDetail}`);
+        }
+      }
+    });
+
+    e.target.value = '';
+  };
+  const handleChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+    const userMessage: ChatMessage = { role: 'user', content: query };
+    const currentHistory = chatMessages.map(m => ({ role: m.role, content: m.content }));
+    setChatMessages(prev => [...prev, userMessage]);
+    setQuery('');
+    setChatting(true);
+    try {
+      const r = await chatWithRAG(userMessage.content, 20, useRag, useWebSearch, useOriginalDoc, currentHistory);
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: r.answer,
+        sources: r.sources,
+        webSources: r.web_sources,
+        originalDocStatus: r.original_doc_status
+      }]);
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `抱歉，对话失败: ${e.response?.data?.detail || e.message}` }]);
+    } finally { setChatting(false); }
+  };
+
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textContent.trim()) return;
+    setUploading(true); setMessage('');
+    try {
+      const r = await saveText(textContent, textTitle || undefined);
+      setMessage(`✓ 保存成功: ${r.title}`);
+      setTextContent('');
+      setTextTitle('');
+      loadDocuments();
+    } catch (e: any) {
+      // 如果是相似文档提示
+      const errorDetail = e.response?.data?.detail || e.message;
+      if (errorDetail.includes('相似文档')) {
+        setMessage(`⚠️ ${errorDetail}`);
+      } else {
+        setMessage(`✗ 保存失败: ${errorDetail}`);
+      }
+    }
+    finally { setUploading(false); }
+  };
+
+  const handleUpload = async (file: File) => {
+    setUploading(true); setMessage('');
+    try {
+      const r = await uploadFile(file, forceUpload, overwriteUpload);
+      console.log('Upload response:', r);
+
+      // 检查是否是相似文档提示
+      if (r.similar_documents && r.similar_documents.length > 0) {
+        const similarTitles = r.similar_documents.map((d: any) => d.title).join('、');
+        setMessage(`⚠️ 发现相似文档：${similarTitles}。${r.suggestion || ''}`);
+      } else {
+        setMessage(`✓ 上传成功: ${r.title}`);
+      }
+
+      loadDocuments();
+    } catch (e: any) {
+      console.error('Upload error:', e);
+      setMessage(`✗ 上传失败: ${e.response?.data?.detail || e.message}`);
+    }
+    finally { setUploading(false); }
+  };
+
+  const SUPPORTED_EXTS = ['.md', '.pdf'];
+
+  const handleDirectoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const supported = Array.from(files).filter(f =>
+      SUPPORTED_EXTS.some(ext => f.name.toLowerCase().endsWith(ext))
+    );
+    if (supported.length === 0) {
+      setMessage(`✗ 目录中没有找到支持的文件（${SUPPORTED_EXTS.join('、')}）`);
+      return;
+    }
+    // 按类型统计
+    const mdCount = supported.filter(f => f.name.toLowerCase().endsWith('.md')).length;
+    const pdfCount = supported.filter(f => f.name.toLowerCase().endsWith('.pdf')).length;
+    const typeDesc = [mdCount && `${mdCount} 个 MD`, pdfCount && `${pdfCount} 个 PDF`].filter(Boolean).join('、');
+
+    setUploading(true); setMessage(''); setUploadDone(false);
+    setUploadLogs([`发现 ${supported.length} 个文件（${typeDesc}），开始上传...`]);
+    setUploadProgress(0); setUploadTotal(supported.length);
+    let successCount = 0, totalChunks = 0;
+    for (let i = 0; i < supported.length; i++) {
+      const file = supported[i];
+      const relativePath = (file as any).webkitRelativePath || file.name;
+      setUploadLogs(prev => [...prev, `正在处理 (${i + 1}/${supported.length}): ${relativePath}`]);
+      try {
+        const r = await uploadFile(file, forceUpload, overwriteUpload);
+
+        // 检查是否是相似文档提示
+        if (r.similar_documents && r.similar_documents.length > 0) {
+          const similarTitles = r.similar_documents.map((d: any) => d.title).join('、');
+          setUploadLogs(prev => [...prev, `⚠️ ${relativePath}: 发现相似文档 ${similarTitles}`]);
+        } else {
+          successCount++;
+          totalChunks += r.chunks_count || 0;
+          setUploadLogs(prev => [...prev, `✓ ${relativePath} (${r.chunks_count} 个文本块)`]);
+        }
+
+        setUploadProgress(i + 1);
+      } catch (e: any) {
+        setUploadLogs(prev => [...prev, `❌ ${relativePath}: ${e.response?.data?.detail || e.message}`]);
+        setUploadProgress(i + 1);
+      }
+    }
+    setMessage(`✓ 上传完成: ${successCount} 个文件，${totalChunks} 个文本块`);
+    loadDocuments(); setUploading(false); setUploadDone(true);
+    e.target.value = '';
+  };
+
+  const handleSaveLLMConfig = async () => {
+    try {
+      await configureLLM(llmConfig);
+      localStorage.setItem('llm_config', JSON.stringify(llmConfig));
+      setMessage('✓ LLM 配置保存成功'); setLlmConfigured(true);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (e: any) { setMessage(`✗ 配置失败: ${e.response?.data?.detail || e.message}`); }
+  };
+
+  const handleSaveEmbeddingConfig = async () => {
+    try {
+      const result = await configureEmbedding(embeddingConfig);
+      setMessage(`✓ 嵌入模型配置成功，向量维度: ${result.dimension}`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (e: any) { setMessage(`✗ 配置失败: ${e.response?.data?.detail || e.message}`); }
+  };
+
+  const getSubmitHandler = () => {
+    if (mode === 'chat') return handleChat;
+    return handleTextSubmit;
+  };
+
+  const fileTypeLabel: Record<string, string> = {
+    markdown: '📝 Markdown', pdf: '📄 PDF', word: '📃 Word',
+    text: '📋 文本', audio: '🎵 音频', image: '🖼 图片', video: '🎬 视频',
+  };
+
+  const modeLabels: Record<Mode, string> = {
+    chat: '💬 对话', memory: '💾 记忆', settings: '⚙️ 设置', admin: '🗄 管理',
+  };
+
+  const actionBtn = (onClick: () => void, children: React.ReactNode, label: string) => (
+    <button
+      onClick={onClick}
+      title={label}
+      className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-all"
+    >
+      {children}
+      <span>{label}</span>
+    </button>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+
+      {/* Export Progress Overlay */}
+      {exporting && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div className="text-center">
+              <div className="mb-4">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">正在导出数据库</h3>
+              <p className="text-gray-600 mb-4">正在生成备份文件，请稍候...</p>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '100%' }}></div>
+              </div>
+              <p className="text-sm text-gray-500 mt-4">请勿关闭页面</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Dialog */}
+      {confirm.visible && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-xl font-bold text-gray-900 mb-3">{confirm.title}</h3>
+            <p className="text-gray-600 mb-6 leading-relaxed">{confirm.message}</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setConfirm(p => ({ ...p, visible: false }))}
+                className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">取消</button>
+              <button onClick={confirm.onConfirm}
+                className="px-5 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors">确认</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Header (only title + tabs) ===== */}
+      <header className="flex flex-col items-center pt-10 pb-0 px-8 shrink-0">
+        <h1 className="text-5xl font-bold text-gray-900 mb-8">Memory</h1>
+        <div className="flex gap-3 flex-wrap justify-center">
+          {(Object.keys(modeLabels) as Mode[]).map((m) => (
+            <button key={m} onClick={() => setMode(m)}
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${mode === m ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>
+              {modeLabels[m]}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* ===== Chat Mode (full-height scrollable) ===== */}
+      {mode === 'chat' && (
+        <div
+          ref={chatContainerRef}
+          className="flex-1 overflow-y-auto px-8 py-6"
+          style={{ paddingBottom: '180px' }}
+        >
+          <div className="max-w-4xl mx-auto space-y-6">
+            {chatMessages.length === 0 && (
+              <div className="text-center text-gray-400 mt-24 text-sm">开始和大模型对话吧 {useRag ? '（知识库模式）' : '（直接对话）'}</div>
+            )}
+
+            {chatMessages.map((msg, index) => (
+              <div key={index} className={`flex flex-col gap-1 group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                {/* 消息气泡 */}
+                <div className={`max-w-3xl rounded-2xl px-6 py-4 ${msg.role === 'user' ? 'bg-gray-900 text-white' : 'bg-white text-gray-800 shadow-md'}`}>
+                  {msg.role === 'assistant' ? (() => {
+                    const { thinking, answer } = parseThinking(msg.content);
+                    return (
+                      <>
+                        {thinking && (
+                          <div className="mb-3 pb-3 border-b border-gray-100">
+                            <p className="text-xs text-gray-400 mb-1 font-medium">思考过程</p>
+                            <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{thinking}</p>
+                          </div>
+                        )}
+                        {(answer || !thinking) && (
+                          <MarkdownRenderer content={answer || msg.content} />
+                        )}
+                      </>
+                    );
+                  })() : (
+                    <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  )}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-700">
+                      <p className="text-xs text-gray-400 mb-2">知识库来源：</p>
+                      {msg.sources.map((s, i) => (
+                        <div key={i} className="text-xs text-gray-300 mb-1">
+                          • 文档 #{s.document_id} ({(s.similarity * 100).toFixed(0)}% 匹配)
+                        </div>
+                      ))}
+                      {msg.originalDocStatus && (
+                        <div className="mt-3 pt-3 border-t border-gray-600">
+                          <pre className="text-xs text-gray-400 whitespace-pre-wrap">{msg.originalDocStatus}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {msg.webSources && msg.webSources.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-700">
+                      <p className="text-xs text-gray-400 mb-2">网络来源：</p>
+                      {msg.webSources.map((s: any, i: number) => (
+                        <div key={i} className="text-xs text-gray-300 mb-1">
+                          • <a href={s.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{s.title}</a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 操作按钮（悬停显示） */}
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  {actionBtn(() => handleCopy(msg.content, index),
+                    copiedIdx === index ? <CheckIcon /> : <CopyIcon />,
+                    copiedIdx === index ? '已复制' : '复制'
+                  )}
+                  {msg.role === 'user' && actionBtn(() => handleResend(msg.content), <ResendIcon />, '重发')}
+                </div>
+              </div>
+            ))}
+
+            {/* 思考中动画 */}
+            {chatting && (
+              <div className="flex items-start gap-3">
+                <div className="bg-white rounded-2xl px-6 py-4 shadow-md">
+                  <div className="flex gap-1 items-center">
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={chatEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* ===== Non-chat content ===== */}
+      {mode !== 'chat' && (
+        <main className="flex-1 flex flex-col items-center px-8 py-8">
+
+          {/* Settings */}
+          {mode === 'settings' && (
+            <div className="w-full max-w-2xl space-y-6">
+              {/* LLM Config */}
+              <div className="bg-white rounded-2xl p-8 shadow-md">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">云端大模型配置</h2>
+                <div className="space-y-4">
+                  {[
+                    { label: 'API Base URL', key: 'base_url', type: 'text', placeholder: '例如: https://ark.cn-beijing.volces.com/api/v3' },
+                    { label: 'API Key', key: 'api_key', type: 'password', placeholder: '输入 API Key' },
+                    { label: '模型名称', key: 'model', type: 'text', placeholder: '例如: doubao-pro-4k, gpt-4o, qwen-plus' },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
+                      <input type={f.type} value={(llmConfig as any)[f.key] || ''}
+                        onChange={(e) => setLlmConfig({ ...llmConfig, [f.key]: e.target.value })}
+                        placeholder={f.placeholder}
+                        className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                    </div>
+                  ))}
+                  <button onClick={handleSaveLLMConfig}
+                    className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
+                  {llmConfigured && <div className="text-sm text-green-600 text-center">✓ LLM 已配置</div>}
+                </div>
+              </div>
+
+              {/* Embedding Config */}
+              <div className="bg-white rounded-2xl p-8 shadow-md">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">嵌入模型配置</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">模型提供商</label>
+                    <select value={embeddingConfig.provider}
+                      onChange={(e) => {
+                        const newProvider = e.target.value;
+                        const defaultModels: Record<string, string> = {
+                          'local': 'paraphrase-multilingual-MiniLM-L12-v2',
+                          'doubao': 'doubao-embedding-vision-251215',
+                          'openai': 'text-embedding-3-small'
+                        };
+                        setEmbeddingConfig({
+                          ...embeddingConfig,
+                          provider: newProvider,
+                          model: defaultModels[newProvider] || embeddingConfig.model
+                        });
+                      }}
+                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none">
+                      <option value="local">本地模型 (sentence-transformers)</option>
+                      <option value="doubao">豆包 Embedding</option>
+                      <option value="openai">云端 API (OpenAI 兼容)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">模型名称</label>
+                    <input type="text" value={embeddingConfig.model}
+                      onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, model: e.target.value })}
+                      placeholder={
+                        embeddingConfig.provider === 'local' ? '例如: paraphrase-multilingual-MiniLM-L12-v2' :
+                        embeddingConfig.provider === 'doubao' ? '例如: doubao-embedding-vision-251215' :
+                        '例如: text-embedding-3-small'
+                      }
+                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                    {embeddingConfig.provider === 'local' && (
+                      <p className="text-xs text-gray-500 mt-1">推荐: paraphrase-multilingual-MiniLM-L12-v2, BAAI/bge-small-zh-v1.5</p>
+                    )}
+                    {embeddingConfig.provider === 'doubao' && (
+                      <p className="text-xs text-gray-500 mt-1">推荐: doubao-embedding-vision-251215</p>
+                    )}
+                  </div>
+
+                  {(embeddingConfig.provider === 'openai' || embeddingConfig.provider === 'doubao') && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+                        <input type="password" value={embeddingConfig.api_key || ''}
+                          onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, api_key: e.target.value })}
+                          placeholder="输入 API Key"
+                          className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                      </div>
+                      {embeddingConfig.provider === 'openai' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Base URL (可选)</label>
+                          <input type="text" value={embeddingConfig.base_url || ''}
+                            onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, base_url: e.target.value })}
+                            placeholder="例如: https://api.openai.com/v1"
+                            className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-sm text-amber-800">⚠️ 更换嵌入模型后，需要在「管理」页重置知识库并重新上传文档，否则新旧向量不兼容</p>
+                  </div>
+
+                  <button onClick={handleSaveEmbeddingConfig}
+                    className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
+                </div>
+              </div>
+
+              {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
+            </div>
+          )}
+
+          {/* Memory Mode */}
+          {mode === 'memory' && (
+            <div className="w-full max-w-4xl space-y-6">
+              {/* 文本输入区域 */}
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-1">直接输入文本</h3>
+                <p className="text-xs text-gray-400 mb-3">直接输入或粘贴文本内容，保存到知识库</p>
+                <form onSubmit={handleTextSubmit}>
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={textTitle}
+                      onChange={(e) => setTextTitle(e.target.value)}
+                      placeholder="输入标题（可选）"
+                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
+                      disabled={uploading}
+                    />
+                    <textarea
+                      value={textContent}
+                      onChange={(e) => setTextContent(e.target.value)}
+                      placeholder="在此输入或粘贴要保存的文本内容..."
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm resize-none"
+                      rows={5}
+                      disabled={uploading}
+                    />
+                    <button
+                      type="submit"
+                      disabled={uploading || !textContent.trim()}
+                      className="px-6 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {uploading ? '保存中...' : '保存到知识库'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-1">上传文档到知识库</h3>
+                <p className="text-xs text-gray-400 mb-5">支持 Markdown（感知分块）和 PDF（按页分块），上传后自动向量化</p>
+
+                {/* 上传选项 */}
+                <div className="mb-4 space-y-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={forceUpload}
+                      onChange={(e) => setForceUpload(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                    强制上传（跳过相似文档检测）
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={overwriteUpload}
+                      onChange={(e) => setOverwriteUpload(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                    覆盖上传（覆盖同名文档）
+                  </label>
+                </div>
+
+                {/* 单文件上传 */}
+                <div className="mb-5">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    单个文件
+                    <span className="ml-2 text-xs font-normal text-gray-400">.md · .pdf</span>
+                  </label>
+                  <input type="file" accept=".md,.pdf" disabled={uploading}
+                    onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 disabled:opacity-50" />
+                </div>
+
+                {/* 目录批量上传 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    批量上传目录
+                    <span className="ml-2 text-xs font-normal text-gray-400">自动扫描目录下所有 .md 和 .pdf 文件</span>
+                  </label>
+                  <input type="file" {...{ webkitdirectory: "true", directory: "true" } as any} onChange={handleDirectoryUpload} disabled={uploading}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 disabled:opacity-50" />
+                </div>
+              </div>
+
+              {(uploading || uploadDone) && (
+                <div className="bg-white rounded-2xl p-6 shadow-md">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">
+                    {uploading ? '上传进度' : '上传结果'}
+                  </h3>
+                  {uploadTotal > 0 && (
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-gray-600 mb-1">
+                        <span>{uploading ? '正在处理...' : '已完成'}</span>
+                        <span>{uploadProgress}/{uploadTotal}</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                          style={{ width: `${(uploadProgress / uploadTotal) * 100}%` }}></div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="bg-gray-900 rounded-lg p-4 max-h-72 overflow-y-auto">
+                    <div className="font-mono text-xs text-green-400 space-y-1">
+                      {uploadLogs.map((log, i) => <div key={i} className="whitespace-pre-wrap">{log}</div>)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {documents.length > 0 && (
+                <div className="bg-white rounded-2xl p-6 shadow-md">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">已上传文档 ({documents.length})</h3>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {documents.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                            doc.file_type === 'markdown' ? 'bg-blue-100 text-blue-700' :
+                            doc.file_type === 'pdf' ? 'bg-red-100 text-red-700' :
+                            doc.file_type === 'word' ? 'bg-indigo-100 text-indigo-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {doc.file_type === 'markdown' ? 'MD' :
+                             doc.file_type === 'pdf' ? 'PDF' :
+                             doc.file_type === 'word' ? 'DOC' : 'TXT'}
+                          </span>
+                          <span className="text-gray-800 truncate text-sm">{doc.title}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 shrink-0 ml-3">{new Date(doc.created_at).toLocaleDateString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {message && (
+                <div className={`text-sm ${message.includes('✓') || message.includes('成功') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>
+              )}
+            </div>
+          )}
+
+          {/* Admin Mode */}
+          {mode === 'admin' && (
+            <div className="w-full max-w-4xl space-y-6">
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: '文档总数', value: statsLoading ? '...' : dbStats?.document_count ?? '-', icon: '📄' },
+                  { label: '向量块总数', value: statsLoading ? '...' : dbStats?.chunk_count ?? '-', icon: '🧩' },
+                  { label: '数据库大小', value: statsLoading ? '...' : dbStats?.db_size ?? '-', icon: '💾' },
+                ].map((card) => (
+                  <div key={card.label} className="bg-white rounded-2xl p-6 shadow-md text-center">
+                    <div className="text-3xl mb-2">{card.icon}</div>
+                    <div className="text-2xl font-bold text-gray-900">{card.value}</div>
+                    <div className="text-sm text-gray-500 mt-1">{card.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {dbStats && (
+                <div className="bg-white rounded-2xl p-6 shadow-md">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">Embedding 模型</h3>
+                  <div className="flex items-center gap-3">
+                    <span className="px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                      {dbStats.embedding_provider === 'local' ? '本地模型' :
+                       dbStats.embedding_provider === 'doubao' ? '豆包 Embedding' :
+                       '云端 API'}
+                    </span>
+                    <span className="text-gray-700 font-mono text-sm">{dbStats.embedding_model}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-3">
+                    ⚠️ 导入备份时会自动检查 embedding 模型是否匹配
+                  </p>
+                </div>
+              )}
+
+              {/* 原始文档搜索路径 */}
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
+                <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={newDocPath}
+                    onChange={(e) => setNewDocPath(e.target.value)}
+                    placeholder="输入本地路径，如 /Users/yzc/docs"
+                    className="flex-1 px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
+                  />
+                  <button
+                    onClick={handleAddDocPath}
+                    disabled={!newDocPath.trim()}
+                    className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    添加
+                  </button>
+                </div>
+                {originalDocPaths.length === 0 ? (
+                  <p className="text-sm text-gray-400">尚未配置搜索路径</p>
+                ) : (
+                  <div className="space-y-2">
+                    {originalDocPaths.map((path) => (
+                      <div key={path} className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-lg">
+                        <span className="text-sm text-gray-700 font-mono truncate flex-1">{path}</span>
+                        <button
+                          onClick={() => handleRemoveDocPath(path)}
+                          className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {dbStats && Object.keys(dbStats.type_counts).length > 0 && (
+                <div className="bg-white rounded-2xl p-6 shadow-md">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">文档类型分布</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {Object.entries(dbStats.type_counts).map(([type, count]) => (
+                      <span key={type} className="px-4 py-2 bg-gray-100 rounded-full text-sm text-gray-700">
+                        {fileTypeLabel[type] || type}：{count} 篇
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button onClick={loadDbStats}
+                  className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors text-sm font-medium">
+                  🔄 刷新统计
+                </button>
+                <button onClick={handleExport}
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium">
+                  📥 导出备份
+                </button>
+                <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
+                  📤 导入备份
+                  <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                </label>
+                <button onClick={handleReset}
+                  className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium ml-auto">
+                  🗑 重置知识库
+                </button>
+              </div>
+
+              {adminMessage && (
+                <div className={`text-sm px-4 py-3 rounded-xl whitespace-pre-wrap ${adminMessage.includes('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  {adminMessage}
+                </div>
+              )}
+
+              <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100">
+                  <h3 className="text-lg font-bold text-gray-900">文档列表（{documents.length} 篇）</h3>
+                </div>
+                {documents.length === 0 ? (
+                  <div className="text-center text-gray-400 py-12">暂无文档</div>
+                ) : (
+                  <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                    {documents.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className="text-gray-400 text-xs w-8 shrink-0">#{doc.id}</span>
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                            doc.file_type === 'markdown' ? 'bg-blue-100 text-blue-700' :
+                            doc.file_type === 'pdf' ? 'bg-red-100 text-red-700' :
+                            doc.file_type === 'word' ? 'bg-indigo-100 text-indigo-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {doc.file_type === 'markdown' ? 'MD' :
+                             doc.file_type === 'pdf' ? 'PDF' :
+                             doc.file_type === 'word' ? 'DOC' : 'TXT'}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-gray-800 text-sm truncate">{doc.title}</p>
+                            <p className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleString()}</p>
+                          </div>
+                        </div>
+                        <button onClick={() => handleDeleteDocument(doc)}
+                          className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* ===== Bottom Input (chat / search) ===== */}
+      {mode !== 'settings' && mode !== 'memory' && mode !== 'admin' && (
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-50/95 backdrop-blur border-t border-gray-200 p-4">
+          <div className="max-w-4xl mx-auto">
+            <form onSubmit={getSubmitHandler()}>
+              <div className="bg-white rounded-2xl border-2 border-gray-200 focus-within:border-gray-400 transition-colors">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={
+                    mode === 'chat' ? (useRag ? '向你的知识库提问...' : '和大模型聊天...') :
+                    '记录新的想法...'
+                  }
+                  className="w-full px-5 py-3.5 text-base text-gray-900 bg-transparent outline-none rounded-t-2xl"
+                  disabled={uploading || chatting}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { getSubmitHandler()(e as any); } }}
+                />
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100">
+                  <div className="flex items-center gap-4">
+                    {mode === 'chat' && (
+                      <>
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                          <input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
+                          知识库
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                          <input type="checkbox" checked={useOriginalDoc} onChange={(e) => setUseOriginalDoc(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
+                          原始文档
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                          <input type="checkbox" checked={useWebSearch} onChange={(e) => setUseWebSearch(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
+                          联网搜索
+                        </label>
+                      </>
+                    )}
+                  </div>
+                  <button type="submit"
+                    disabled={(mode === 'chat' ? chatting : uploading) || !query.trim()}
+                    className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    {mode === 'chat' ? (chatting ? '思考中...' : '发送') : (uploading ? '保存中...' : '保存')}
+                  </button>
+                </div>
+              </div>
+            </form>
+            <div className="text-center text-xs text-gray-400 mt-2">Memory v0.2.0 · 基于本地 AI 的智能笔记系统 · by zhichao.yu</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;

@@ -172,7 +172,7 @@ Model: llama3
 
 ## 👤 作者
 
-zhichao.yu
+Zhichao
 
 ## 📄 许可证
 

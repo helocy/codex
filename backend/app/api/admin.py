@@ -170,7 +170,7 @@ async def export_database(db: Session = Depends(get_db)):
         file_stream = io.BytesIO(json_str.encode('utf-8'))
 
         # 生成文件名
-        filename = f"memory_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        filename = f"codex_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
         return StreamingResponse(
             file_stream,

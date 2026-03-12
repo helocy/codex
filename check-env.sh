@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "=== Memory 本地开发环境检查 ==="
+echo "=== Codex 本地开发环境检查 ==="
 echo ""
 
 # 检查 PostgreSQL

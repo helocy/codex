@@ -1,4 +1,4 @@
-# Memory 快速启动指南
+# Codex 快速启动指南
 
 ## 一、在新电脑上部署
 
@@ -15,8 +15,8 @@
 
 ```bash
 # 1. 获取代码
-git clone <repo-url> memory
-cd memory
+git clone <repo-url> codex
+cd codex
 
 # 2. 执行部署脚本（自动安装所有依赖）
 bash deploy.sh
@@ -99,7 +99,7 @@ API Key:   ollama
 
 ## 三、配置 Embedding 模型
 
-Memory 支持三种 embedding 模型：
+Codex 支持三种 embedding 模型：
 
 | 提供商 | 模型名称 | 说明 |
 |--------|----------|------|
@@ -237,10 +237,10 @@ Memory 支持三种 embedding 模型：
 
 ```bash
 # 备份数据库
-pg_dump -U memory memory_db > memory_backup.sql
+pg_dump -U codex codex_db > codex_backup.sql
 
 # 恢复数据库
-psql -U memory memory_db < memory_backup.sql
+psql -U codex codex_db < codex_backup.sql
 ```
 
 ### 迁移到新电脑

@@ -1,12 +1,12 @@
 #!/bin/bash
-# Memory - 一键启动脚本
+# Codex - 一键启动脚本
 # 用法: bash start.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
-echo "=== 启动 Memory 服务 ==="
+echo "=== 启动 Codex 服务 ==="
 
 # 检查并杀掉已有的后端/前端进程
 EXISTING_BACKEND=$(lsof -ti :8001 2>/dev/null)

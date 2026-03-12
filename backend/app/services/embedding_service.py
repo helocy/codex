@@ -91,50 +91,49 @@ class EmbeddingService:
         return self._local_model.encode(texts, show_progress_bar=False)
 
     # ── 豆包 Embedding ────────────────────────────────────────────────────────
-    def _encode_doubao(self, texts: List[str]) -> List[np.ndarray]:
-        """使用豆包 ARK API 进行 embedding"""
+    def _encode_doubao_single(self, text: str) -> np.ndarray:
+        """使用豆包 ARK API 对单条文本进行 embedding"""
         import requests
-        
+
         if not self.api_key:
             raise ValueError("豆包嵌入模型需要配置 API Key")
-        
-        # 豆包 ARK multimodal embeddings API 端点
+
         url = "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
-        # 构建 multimodal 格式的输入
-        input_data = [{"type": "text", "text": text} for text in texts]
-        
+
         data = {
             "model": self.model_name,
-            "input": input_data
+            "input": [{"type": "text", "text": text}]
         }
-        
+
         response = requests.post(url, headers=headers, json=data, timeout=60)
         response.raise_for_status()
-        
+
         result_data = response.json()
-        
-        # 解析返回的 embedding
-        result = []
-        data = result_data.get("data", {})
-        
-        # 豆包 multimodal embeddings 返回格式: {"data": {"embedding": [...]}}
-        # 单个文本输入时直接返回 embedding 数组
-        if isinstance(data, dict) and "embedding" in data:
-            embedding = data.get("embedding", [])
-            result.append(np.array(embedding, dtype=np.float32))
-        # 多个文本输入时返回列表
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and "embedding" in item:
-                    embedding = item.get("embedding", [])
-                    result.append(np.array(embedding, dtype=np.float32))
-        
-        return result
+        embed_data = result_data.get("data", {})
+
+        if isinstance(embed_data, dict) and "embedding" in embed_data:
+            return np.array(embed_data["embedding"], dtype=np.float32)
+        elif isinstance(embed_data, list) and embed_data:
+            return np.array(embed_data[0].get("embedding", []), dtype=np.float32)
+
+        raise ValueError(f"豆包 API 返回格式异常: {result_data}")
+
+    def _encode_doubao(self, texts: List[str]) -> List[np.ndarray]:
+        """并发调用豆包 API（multimodal API 不支持真正批量，改为并发请求）"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        results = [None] * len(texts)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(self._encode_doubao_single, text): i
+                       for i, text in enumerate(texts)}
+            for future in as_completed(futures):
+                idx = futures[future]
+                results[idx] = future.result()
+        return results
 
     # ── 云端 OpenAI 兼容接口 ─────────────────────────────────────────────────
     def _encode_openai(self, texts: List[str]) -> List[np.ndarray]:

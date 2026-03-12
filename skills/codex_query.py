@@ -1,16 +1,16 @@
 """
-Memory Knowledge Base - Python Client
+Codex Knowledge Base - Python Client
 =====================================
 
-这个模块提供了与 Memory 知识库交互的 Python 客户端。
+这个模块提供了与 Codex 知识库交互的 Python 客户端。
 
 安装:
     pip install requests
 
 使用示例:
-    from memory_client import MemoryClient
+    from codex_client import CodexClient
 
-    client = MemoryClient()
+    client = CodexClient()
 
     # 搜索
     results = client.search("RAG")
@@ -27,8 +27,8 @@ import requests
 from typing import Optional, List, Dict, Any
 
 
-class MemoryClient:
-    """Memory 知识库 Python 客户端"""
+class CodexClient:
+    """Codex 知识库 Python 客户端"""
 
     def __init__(
         self,
@@ -43,7 +43,7 @@ class MemoryClient:
             api_key: API 密钥，默认从环境变量 MEMORY_API_KEY 获取
         """
         self.api_url = api_url or os.environ.get("MEMORY_API_URL", "http://localhost:8001")
-        self.api_key = api_key or os.environ.get("MEMORY_API_KEY", "memory-admin-key")
+        self.api_key = api_key or os.environ.get("MEMORY_API_KEY", "codex-admin-key")
         self.headers = {"Authorization": self.api_key}
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
@@ -207,7 +207,7 @@ class MemoryClient:
 
 def search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     """快速搜索函数"""
-    return MemoryClient().search(query, top_k)
+    return CodexClient().search(query, top_k)
 
 
 def chat(
@@ -216,13 +216,13 @@ def chat(
     use_web_search: bool = False
 ) -> str:
     """快速对话函数，返回回答文本"""
-    result = MemoryClient().chat(query, use_rag, use_web_search)
+    result = CodexClient().chat(query, use_rag, use_web_search)
     return result["answer"]
 
 
 def add_document(title: str, content: str) -> int:
     """快速添加文档函数，返回文档 ID"""
-    result = MemoryClient().add_document(title, content)
+    result = CodexClient().add_document(title, content)
     return result["document_id"]
 
 
@@ -231,7 +231,7 @@ def add_document(title: str, content: str) -> int:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Memory Knowledge Base CLI")
+    parser = argparse.ArgumentParser(description="Codex Knowledge Base CLI")
     subparsers = parser.add_subparsers(dest="command")
 
     # search 命令
@@ -254,7 +254,7 @@ if __name__ == "__main__":
     add_parser.add_argument("content", help="文档内容")
 
     args = parser.parse_args()
-    client = MemoryClient()
+    client = CodexClient()
 
     if args.command == "search":
         results = client.search(args.query, args.top_k)

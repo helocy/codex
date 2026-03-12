@@ -1,8 +1,8 @@
 #!/bin/bash
 
-echo "=== 启动 Memory 后端服务 ==="
+echo "=== 启动 Codex 后端服务 ==="
 
-cd /Users/yzc/claude/memory/backend
+cd /Users/yzc/claude/codex/backend
 
 # 激活虚拟环境
 source venv/bin/activate

@@ -4,15 +4,15 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # 项目信息
-    PROJECT_NAME: str = "Memory"
+    PROJECT_NAME: str = "Codex"
     VERSION: str = "0.2.0"
     API_V1_STR: str = "/api/v1"
 
     # 数据库配置
     POSTGRES_SERVER: str = "localhost"
-    POSTGRES_USER: str = "memory"
-    POSTGRES_PASSWORD: str = "memory123"
-    POSTGRES_DB: str = "memory_db"
+    POSTGRES_USER: str = "codex"
+    POSTGRES_PASSWORD: str = "codex123"
+    POSTGRES_DB: str = "codex_db"
     POSTGRES_PORT: int = 5432
 
     @property

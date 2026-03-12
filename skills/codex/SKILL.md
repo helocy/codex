@@ -1,4 +1,4 @@
-# memory-search Skill
+# codex-search Skill
 
 _访问用户本地知识库，通过检索增强生成（RAG）回答问题_
 
@@ -13,7 +13,7 @@ _访问用户本地知识库，通过检索增强生成（RAG）回答问题_
 ## 配置
 
 **API 地址**: `http://localhost:8001`
-**认证**: Bearer token `memory-admin-key`
+**认证**: Bearer token `codex-admin-key`
 
 ### 端点
 
@@ -36,7 +36,7 @@ _访问用户本地知识库，通过检索增强生成（RAG）回答问题_
 ### 1. 搜索知识库
 ```bash
 curl -X POST http://localhost:8001/api/v1/api/search \
-  -H "Authorization: memory-admin-key" \
+  -H "Authorization: codex-admin-key" \
   -H "Content-Type: application/json" \
   -d '{"query": "你的问题", "top_k": 5}'
 ```
@@ -47,7 +47,7 @@ curl -X POST http://localhost:8001/api/v1/api/search \
 
 ```bash
 curl -X POST http://localhost:8001/api/v1/api/chat \
-  -H "Authorization: memory-admin-key" \
+  -H "Authorization: codex-admin-key" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "你的问题",
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8001/api/v1/api/chat \
 ### 3. 查看知识库状态
 ```bash
 curl http://localhost:8001/api/v1/api/stats \
-  -H "Authorization: memory-admin-key"
+  -H "Authorization: codex-admin-key"
 ```
 
 ## 示例对话

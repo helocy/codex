@@ -332,25 +332,30 @@ function App() {
   };
 
   const handleUpload = async (file: File) => {
-    setUploading(true); setMessage('');
+    setUploading(true); setMessage(''); setUploadDone(false);
+    setUploadLogs([`正在处理: ${file.name}`]);
+    setUploadProgress(0); setUploadTotal(1);
     try {
       const r = await uploadFile(file, forceUpload, overwriteUpload);
-      console.log('Upload response:', r);
 
-      // 检查是否是相似文档提示
       if (r.similar_documents && r.similar_documents.length > 0) {
         const similarTitles = r.similar_documents.map((d: any) => d.title).join('、');
-        setMessage(`⚠️ 发现相似文档：${similarTitles}。${r.suggestion || ''}`);
+        setUploadLogs(prev => [...prev, `⚠️ 发现相似文档：${similarTitles}。${r.suggestion || ''}`]);
+        setMessage(`⚠️ 发现相似文档：${similarTitles}`);
       } else {
+        setUploadLogs(prev => [...prev, `✓ ${r.title}（${r.chunks_count} 个文本块）`]);
         setMessage(`✓ 上传成功: ${r.title}`);
       }
 
+      setUploadProgress(1);
       loadDocuments();
     } catch (e: any) {
-      console.error('Upload error:', e);
+      setUploadLogs(prev => [...prev, `❌ ${file.name}: ${e.response?.data?.detail || e.message}`]);
+      setUploadProgress(1);
       setMessage(`✗ 上传失败: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setUploading(false); setUploadDone(true);
     }
-    finally { setUploading(false); }
   };
 
   const SUPPORTED_EXTS = ['.md', '.pdf'];

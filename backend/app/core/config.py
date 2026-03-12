@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     DOUBAO_MODEL: str = "doubao-seed-1-6-251015"
 
     # CORS
-    BACKEND_CORS_ORIGINS: list = ["http://localhost:5173", "http://localhost:8001"]
+    BACKEND_CORS_ORIGINS: list = ["*"]
 
     class Config:
         case_sensitive = True

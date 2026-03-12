@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 背景圆角方形 -->
+  <rect width="32" height="32" rx="7" fill="#0f172a"/>
+  <!-- 书本左页 -->
+  <rect x="5" y="7" width="9" height="18" rx="1.5" fill="#3b82f6"/>
+  <!-- 书脊 -->
+  <rect x="14" y="7" width="2" height="18" rx="0.5" fill="#1d4ed8"/>
+  <!-- 书本右页 -->
+  <rect x="16" y="7" width="9" height="18" rx="1.5" fill="#60a5fa"/>
+  <!-- 左页横线 -->
+  <line x1="7" y1="12" x2="12" y2="12" stroke="white" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round"/>
+  <line x1="7" y1="15" x2="12" y2="15" stroke="white" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round"/>
+  <line x1="7" y1="18" x2="12" y2="18" stroke="white" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round"/>
+  <!-- 右页横线 -->
+  <line x1="18" y1="12" x2="23" y2="12" stroke="white" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round"/>
+  <line x1="18" y1="15" x2="23" y2="15" stroke="white" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round"/>
+  <line x1="18" y1="18" x2="23" y2="18" stroke="white" stroke-width="1.2" stroke-opacity="0.6" stroke-linecap="round"/>
+</svg>

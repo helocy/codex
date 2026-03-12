@@ -54,3 +54,6 @@ uploads/
 # Database
 *.db
 *.sqlite
+
+# Claude Code local settings
+.claude/

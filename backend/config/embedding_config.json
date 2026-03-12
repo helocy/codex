@@ -1,0 +1,6 @@
+{
+  "provider": "doubao",
+  "model": "doubao-embedding-vision-251215",
+  "api_key": "b250c2e3-bc70-4eb2-b897-060af07a4cbb",
+  "base_url": ""
+}

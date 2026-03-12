@@ -11,7 +11,15 @@
 | 磁盘 | ≥ 10GB（Python 依赖 + 模型缓存 + 向量数据）|
 | 网络 | 首次部署需要下载依赖和模型 |
 
-### 一键部署
+### 一键安装（推荐）
+
+复制以下命令到终端，适用于 macOS / Ubuntu / Debian：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/helocy/codex/main/install.sh | bash
+```
+
+### 手动部署
 
 ```bash
 # 1. 获取代码
@@ -23,8 +31,10 @@ bash deploy.sh
 ```
 
 脚本会自动完成以下所有步骤：
-- 安装 PostgreSQL、Node.js、Python（如未安装）
-- 创建数据库用户和数据库
+- 安装 PostgreSQL 15 + pgvector、Node.js 20、Python（如未安装）
+- Ubuntu/Debian：通过 PGDG 官方源安装，确保 pgvector 可用
+- macOS：通过 Homebrew 安装，pgvector 从源码编译
+- 创建数据库用户、数据库，并启用 pgvector 扩展
 - 安装 Python 虚拟环境和所有依赖包
 - 安装前端 npm 依赖
 - 生成 `.env` 配置文件（可输入 API Key，也可跳过）

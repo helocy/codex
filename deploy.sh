@@ -88,34 +88,77 @@ install_dependencies() {
             success "Python 已安装: $(python3 --version)"
         fi
 
+        # pgvector（从源码编译，兼容 postgresql@15）
+        PG_CONFIG="$(brew --prefix postgresql@15)/bin/pg_config"
+        PGLIB=$("$PG_CONFIG" --pkglibdir 2>/dev/null)
+        if [[ ! -f "${PGLIB}/vector.dylib" ]] && [[ ! -f "${PGLIB}/vector.so" ]]; then
+            info "编译安装 pgvector..."
+            PGVECTOR_TMP=$(mktemp -d)
+            git clone --depth 1 --branch v0.8.0 https://github.com/pgvector/pgvector.git "$PGVECTOR_TMP"
+            cd "$PGVECTOR_TMP"
+            make PG_CONFIG="$PG_CONFIG" -s
+            make install PG_CONFIG="$PG_CONFIG" -s
+            cd "$SCRIPT_DIR"
+            rm -rf "$PGVECTOR_TMP"
+            success "pgvector 安装完成"
+        else
+            success "pgvector 已安装"
+        fi
+
     elif [[ "$OS" == "debian" ]]; then
         info "更新 apt 索引..."
         sudo apt-get update -qq
+        sudo apt-get install -y curl ca-certificates gnupg lsb-release lsof git
 
-        # PostgreSQL
+        # PostgreSQL 15 + pgvector（via PGDG 官方源，确保 pgvector 可用）
         if ! command -v psql &>/dev/null; then
-            info "安装 PostgreSQL..."
-            sudo apt-get install -y postgresql postgresql-contrib
+            info "添加 PostgreSQL 官方源 (PGDG)..."
+            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | \
+                sudo gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | \
+                sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+            sudo apt-get update -qq
+            info "安装 PostgreSQL 15 + pgvector..."
+            sudo apt-get install -y postgresql-15 postgresql-client-15 postgresql-15-pgvector
             sudo systemctl start postgresql
             sudo systemctl enable postgresql
         else
-            success "PostgreSQL 已安装"
+            success "PostgreSQL 已安装: $(psql --version)"
+            PG_VER=$(psql --version 2>/dev/null | grep -oE '[0-9]+' | head -1)
+            if ! sudo -u postgres psql -tc "SELECT 1 FROM pg_available_extensions WHERE name='vector'" 2>/dev/null | grep -q 1; then
+                info "安装 pgvector (postgresql-${PG_VER}-pgvector)..."
+                # 若未添加 PGDG 源则先添加
+                if [[ ! -f /etc/apt/sources.list.d/pgdg.list ]]; then
+                    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | \
+                        sudo gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg
+                    echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | \
+                        sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+                    sudo apt-get update -qq
+                fi
+                sudo apt-get install -y postgresql-${PG_VER}-pgvector || \
+                    warn "pgvector 安装失败，请参考 https://github.com/pgvector/pgvector"
+            else
+                success "pgvector 已安装"
+            fi
         fi
 
-        # Node.js（via NodeSource）
+        # Node.js 20 LTS（via NodeSource）
         if ! command -v node &>/dev/null; then
-            info "安装 Node.js 18..."
-            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+            info "安装 Node.js 20 LTS..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
             sudo apt-get install -y nodejs
         else
             success "Node.js 已安装: $(node -v)"
         fi
 
-        # Python 3 & pip
+        # Python 3 & venv
         if ! command -v python3 &>/dev/null; then
             sudo apt-get install -y python3 python3-pip python3-venv
         else
             success "Python 已安装: $(python3 --version)"
+            python3 -c "import venv" 2>/dev/null || sudo apt-get install -y python3-venv
         fi
 
         # 构建工具（sentence-transformers 编译需要）
@@ -172,6 +215,14 @@ setup_postgres() {
     # 授权
     $PSQL_CMD -c "GRANT ALL PRIVILEGES ON DATABASE codex_db TO codex;" 2>/dev/null || \
     $PSQL_CMD postgres -c "GRANT ALL PRIVILEGES ON DATABASE codex_db TO codex;" 2>/dev/null || true
+
+    # 启用 pgvector 扩展
+    info "启用 pgvector 扩展..."
+    if [[ "$OS" == "macos" ]]; then
+        psql codex_db -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
+    else
+        sudo -u postgres psql codex_db -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
+    fi
 
     success "数据库配置完成"
 }
@@ -326,6 +377,12 @@ echo "前端 PID: $FRONTEND_PID"
 echo ""
 echo "=== 服务已启动 ==="
 echo "前端:    http://localhost:5173"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
+else
+    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+fi
+[ -n "$LAN_IP" ] && echo "局域网:  http://${LAN_IP}:5173"
 echo "后端:    http://localhost:8001"
 echo "API文档: http://localhost:8001/docs"
 echo ""
@@ -375,12 +432,12 @@ print_done() {
     echo -e "    API 文档:  ${BLUE}http://localhost:8001/docs${NC}"
     echo ""
     echo -e "  ${BOLD}首次使用：${NC}"
-    echo -e "    1. 在「设置」页配置大模型 API Key"
+    echo -e "    1. 在「配置」页配置大模型 API Key"
     echo -e "    2. 在「记忆」页上传 Markdown 文档建立知识库"
     echo -e "    3. 在「对话」页与大模型对话，开启知识库模式"
     echo ""
     if [[ ! -s "$BACKEND_DIR/.env" ]] || ! grep -q "DOUBAO_API_KEY=." "$BACKEND_DIR/.env" 2>/dev/null; then
-        echo -e "  ${YELLOW}提示: 尚未配置 API Key，请启动后在「设置」页面配置${NC}"
+        echo -e "  ${YELLOW}提示: 尚未配置 API Key，请启动后在「配置」页面配置${NC}"
         echo ""
     fi
 }

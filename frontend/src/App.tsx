@@ -1069,7 +1069,7 @@ function App() {
                 </div>
               </div>
             </form>
-            <div className="text-center text-xs text-gray-400 mt-2">Codex v0.2.2 · 基于本地 AI 的智能笔记系统 · by Zhichao</div>
+            <div className="text-center text-xs text-gray-400 mt-2">Codex v0.2.3 · 基于本地 AI 的智能笔记系统 · by Zhichao</div>
           </div>
         </div>
       )}

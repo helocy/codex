@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Memory - 一键部署脚本
+# Codex - 一键部署脚本
 # 支持 macOS (Homebrew) 和 Ubuntu/Debian Linux
 # 用法: bash deploy.sh
 # =============================================================================
@@ -152,26 +152,26 @@ setup_postgres() {
     fi
 
     # 创建用户（如果不存在）
-    if ! $PSQL_CMD -tAc "SELECT 1 FROM pg_roles WHERE rolname='memory'" 2>/dev/null | grep -q 1; then
-        info "创建数据库用户 memory..."
-        $PSQL_CMD -c "CREATE USER memory WITH PASSWORD 'memory123';" 2>/dev/null || \
-        $PSQL_CMD postgres -c "CREATE USER memory WITH PASSWORD 'memory123';" 2>/dev/null || true
+    if ! $PSQL_CMD -tAc "SELECT 1 FROM pg_roles WHERE rolname='codex'" 2>/dev/null | grep -q 1; then
+        info "创建数据库用户 codex..."
+        $PSQL_CMD -c "CREATE USER codex WITH PASSWORD 'codex123';" 2>/dev/null || \
+        $PSQL_CMD postgres -c "CREATE USER codex WITH PASSWORD 'codex123';" 2>/dev/null || true
     else
-        success "数据库用户 memory 已存在"
+        success "数据库用户 codex 已存在"
     fi
 
     # 创建数据库（如果不存在）
-    if ! $PSQL_CMD -tAc "SELECT 1 FROM pg_database WHERE datname='memory_db'" 2>/dev/null | grep -q 1; then
-        info "创建数据库 memory_db..."
-        $PSQL_CMD -c "CREATE DATABASE memory_db OWNER memory;" 2>/dev/null || \
-        $PSQL_CMD postgres -c "CREATE DATABASE memory_db OWNER memory;" 2>/dev/null || true
+    if ! $PSQL_CMD -tAc "SELECT 1 FROM pg_database WHERE datname='codex_db'" 2>/dev/null | grep -q 1; then
+        info "创建数据库 codex_db..."
+        $PSQL_CMD -c "CREATE DATABASE codex_db OWNER codex;" 2>/dev/null || \
+        $PSQL_CMD postgres -c "CREATE DATABASE codex_db OWNER codex;" 2>/dev/null || true
     else
-        success "数据库 memory_db 已存在"
+        success "数据库 codex_db 已存在"
     fi
 
     # 授权
-    $PSQL_CMD -c "GRANT ALL PRIVILEGES ON DATABASE memory_db TO memory;" 2>/dev/null || \
-    $PSQL_CMD postgres -c "GRANT ALL PRIVILEGES ON DATABASE memory_db TO memory;" 2>/dev/null || true
+    $PSQL_CMD -c "GRANT ALL PRIVILEGES ON DATABASE codex_db TO codex;" 2>/dev/null || \
+    $PSQL_CMD postgres -c "GRANT ALL PRIVILEGES ON DATABASE codex_db TO codex;" 2>/dev/null || true
 
     success "数据库配置完成"
 }
@@ -229,9 +229,9 @@ setup_env() {
     cat > "$ENV_FILE" << EOF
 # 数据库配置
 POSTGRES_SERVER=localhost
-POSTGRES_USER=memory
-POSTGRES_PASSWORD=memory123
-POSTGRES_DB=memory_db
+POSTGRES_USER=codex
+POSTGRES_PASSWORD=codex123
+POSTGRES_DB=codex_db
 POSTGRES_PORT=5432
 
 # 文件存储
@@ -267,14 +267,14 @@ fix_start_script() {
 
     cat > "$SCRIPT_DIR/start.sh" << 'STARTSCRIPT'
 #!/bin/bash
-# Memory - 一键启动脚本
+# Codex - 一键启动脚本
 # 用法: bash start.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
-echo "=== 启动 Memory 服务 ==="
+echo "=== 启动 Codex 服务 ==="
 
 # 检查并杀掉已有的后端/前端进程
 EXISTING_BACKEND=$(lsof -ti :8001 2>/dev/null)
@@ -347,7 +347,7 @@ STARTSCRIPT
 fix_stop_script() {
     cat > "$SCRIPT_DIR/stop.sh" << 'STOPSCRIPT'
 #!/bin/bash
-echo "停止 Memory 服务..."
+echo "停止 Codex 服务..."
 BACKEND=$(lsof -ti :8001 2>/dev/null)
 FRONTEND=$(lsof -ti :5173 2>/dev/null)
 [ -n "$BACKEND" ]  && kill $BACKEND  2>/dev/null && echo "后端已停止"
@@ -361,7 +361,7 @@ STOPSCRIPT
 print_done() {
     echo ""
     echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}${BOLD}║           Memory 部署完成！                          ║${NC}"
+    echo -e "${GREEN}${BOLD}║           Codex 部署完成！                          ║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "  ${BOLD}启动服务：${NC}"

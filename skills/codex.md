@@ -1,4 +1,4 @@
-# Memory Knowledge Base Skill
+# Codex Knowledge Base Skill
 
 ## 概述
 
@@ -8,8 +8,8 @@
 
 ### 环境变量
 
-- `MEMORY_API_URL`: Memory API 地址（默认: http://localhost:8001）
-- `MEMORY_API_KEY`: API 认证密钥（默认: memory-admin-key）
+- `MEMORY_API_URL`: Codex API 地址（默认: http://localhost:8001）
+- `MEMORY_API_KEY`: API 认证密钥（默认: codex-admin-key）
 
 ### API 端点
 
@@ -34,7 +34,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> list:
     """搜索知识库中的相关内容"""
     response = requests.post(
         "http://localhost:8001/api/v1/api/search",
-        headers={"Authorization": "memory-admin-key"},
+        headers={"Authorization": "codex-admin-key"},
         json={"query": query, "top_k": top_k}
     )
     return response.json()
@@ -58,7 +58,7 @@ def chat_with_knowledge_base(
     """与知识库对话"""
     response = requests.post(
         "http://localhost:8001/api/v1/api/chat",
-        headers={"Authorization": "memory-admin-key"},
+        headers={"Authorization": "codex-admin-key"},
         json={
             "query": query,
             "use_rag": use_rag,
@@ -91,7 +91,7 @@ def add_document(title: str, content: str, file_type: str = "text") -> dict:
     """添加文档到知识库"""
     response = requests.post(
         "http://localhost:8001/api/v1/api/documents",
-        headers={"Authorization": "memory-admin-key"},
+        headers={"Authorization": "codex-admin-key"},
         json={
             "title": title,
             "content": content,
@@ -115,7 +115,7 @@ def list_documents(limit: int = 100, offset: int = 0) -> dict:
     """列出知识库中的文档"""
     response = requests.get(
         f"http://localhost:8001/api/v1/api/documents?limit={limit}&offset={offset}",
-        headers={"Authorization": "memory-admin-key"}
+        headers={"Authorization": "codex-admin-key"}
     )
     return response.json()
 
@@ -132,7 +132,7 @@ def delete_document(document_id: int) -> dict:
     """删除文档"""
     response = requests.delete(
         f"http://localhost:8001/api/v1/api/documents/{document_id}",
-        headers={"Authorization": "memory-admin-key"}
+        headers={"Authorization": "codex-admin-key"}
     )
     return response.json()
 
@@ -148,7 +148,7 @@ def get_stats() -> dict:
     """获取知识库统计信息"""
     response = requests.get(
         "http://localhost:8001/api/v1/api/stats",
-        headers={"Authorization": "memory-admin-key"}
+        headers={"Authorization": "codex-admin-key"}
     )
     return response.json()
 
@@ -164,8 +164,8 @@ print(f"Embedding 模型: {stats['embedding_model']}")
 ```python
 import requests
 
-class MemoryClient:
-    def __init__(self, api_url: str = "http://localhost:8001", api_key: str = "memory-admin-key"):
+class CodexClient:
+    def __init__(self, api_url: str = "http://localhost:8001", api_key: str = "codex-admin-key"):
         self.api_url = api_url
         self.headers = {"Authorization": api_key}
 
@@ -222,7 +222,7 @@ class MemoryClient:
 
 
 # 使用示例
-client = MemoryClient()
+client = CodexClient()
 
 # 搜索
 results = client.search("RAG 技术")
@@ -241,7 +241,7 @@ print(client.stats())
 
 ## 注意事项
 
-1. **API Key**: 默认使用 `memory-admin-key`，可在环境变量中配置
+1. **API Key**: 默认使用 `codex-admin-key`，可在环境变量中配置
 2. **Embedding 模型**: 知识库使用的 embedding 模型会影响搜索效果
 3. **文档上传**: 通过 API 添加的文档会自动进行向量化
 4. **网络搜索**: `use_web_search=True` 会同时从互联网搜索相关信息

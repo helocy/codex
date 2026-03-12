@@ -247,7 +247,7 @@ function App() {
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `memory_backup_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+          a.download = `codex_backup_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
           document.body.appendChild(a);
           a.click();
           window.URL.revokeObjectURL(url);
@@ -483,7 +483,7 @@ function App() {
 
       {/* ===== Header (only title + tabs) ===== */}
       <header className="flex flex-col items-center pt-10 pb-0 px-8 shrink-0">
-        <h1 className="text-5xl font-bold text-gray-900 mb-8">Memory</h1>
+        <h1 className="text-5xl font-bold text-gray-900 mb-8">Codex</h1>
         <div className="flex gap-3 flex-wrap justify-center">
           {(Object.keys(modeLabels) as Mode[]).map((m) => (
             <button key={m} onClick={() => setMode(m)}
@@ -693,7 +693,7 @@ function App() {
             </div>
           )}
 
-          {/* Memory Mode */}
+          {/* Codex Mode */}
           {mode === 'memory' && (
             <div className="w-full max-w-4xl space-y-6">
               {/* 文本输入区域 */}
@@ -1031,7 +1031,7 @@ function App() {
                 </div>
               </div>
             </form>
-            <div className="text-center text-xs text-gray-400 mt-2">Memory v0.2.0 · 基于本地 AI 的智能笔记系统 · by zhichao.yu</div>
+            <div className="text-center text-xs text-gray-400 mt-2">Codex v0.2.0 · 基于本地 AI 的智能笔记系统 · by zhichao.yu</div>
           </div>
         </div>
       )}

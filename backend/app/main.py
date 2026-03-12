@@ -43,7 +43,7 @@ app.include_router(api_.router, prefix=f"{settings.API_V1_STR}/api", tags=["exte
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to Memory API",
+        "message": "Welcome to Codex API",
         "version": settings.VERSION,
         "docs": "/docs"
     }

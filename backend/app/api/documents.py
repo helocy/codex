@@ -87,9 +87,9 @@ async def save_text(
         # 文本分块
         chunks = FileProcessor.chunk_text(content, chunk_size=1000)
 
-        # 生成向量并存储
-        for idx, chunk_text in enumerate(chunks):
-            embedding = embedding_service.encode_single(chunk_text)
+        # 批量生成向量（一次 API 调用）并存储
+        embeddings = embedding_service.encode(chunks)
+        for idx, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
             chunk = Chunk(
                 document_id=document.id,
                 content=chunk_text,
@@ -113,20 +113,20 @@ async def save_text(
 
 
 def find_similar_documents(db: Session, content: str, title: str, threshold: float = 0.8, limit: int = 3) -> list:
-    """查找相似的文档"""
+    """查找相似的文档（只取每篇文档的第一个 chunk 做代表，避免全量扫描）"""
+    import numpy as np
+
     # 对新文档内容生成 embedding
     query_embedding = embedding_service.encode_single(content[:5000])  # 取前 5000 字符
 
-    # 获取所有文档的 chunk，计算相似度
-    chunks = db.query(Chunk).all()
+    # 只取每篇文档的第一个 chunk（chunk_index=0）作为代表
+    chunks = db.query(Chunk).filter(Chunk.chunk_index == 0).all()
 
     similar_docs = []
     for chunk in chunks:
         if not chunk.embedding:
             continue
 
-        # 计算余弦相似度
-        import numpy as np
         chunk_emb = np.array(chunk.embedding)
         similarity = np.dot(query_embedding, chunk_emb) / (
             np.linalg.norm(query_embedding) * np.linalg.norm(chunk_emb) + 1e-8
@@ -134,7 +134,6 @@ def find_similar_documents(db: Session, content: str, title: str, threshold: flo
 
         if similarity >= threshold:
             doc_id = chunk.document_id
-            # 避免重复添加同一文档
             if doc_id not in [d['id'] for d in similar_docs]:
                 doc = db.query(Document).filter(Document.id == doc_id).first()
                 if doc and doc.title != title:  # 排除自己
@@ -252,9 +251,9 @@ async def upload_file(
         else:
             chunks = FileProcessor.chunk_text(text)
 
-        # 生成向量并存储
-        for idx, chunk_text in enumerate(chunks):
-            embedding = embedding_service.encode_single(chunk_text)
+        # 批量生成向量（一次 API 调用）并存储
+        embeddings = embedding_service.encode(chunks)
+        for idx, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
             chunk = Chunk(
                 document_id=document.id,
                 content=chunk_text,

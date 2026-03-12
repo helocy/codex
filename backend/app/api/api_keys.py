@@ -47,7 +47,7 @@ def verify_api_key(authorization: str = Header(None)) -> str:
 
     if not key_data:
         # 允许使用预设的管理 key
-        admin_key = os.environ.get("MEMORY_ADMIN_KEY", "memory-admin-key")
+        admin_key = os.environ.get("CODEX_ADMIN_KEY", "codex-admin-key")
         if api_key != admin_key:
             raise HTTPException(status_code=401, detail="无效的 API Key")
 
@@ -60,7 +60,7 @@ def create_api_key(name: str, expires_days: Optional[int] = None) -> tuple[str, 
     Returns:
         (plain_key, hashed_key) - 返回明文 key（只显示一次）和哈希后的 key
     """
-    plain_key = f"mem_{secrets.token_urlsafe(32)}"
+    plain_key = f"cdx_{secrets.token_urlsafe(32)}"
     hashed_key = hash_api_key(plain_key)
 
     expires_at = None
@@ -92,5 +92,5 @@ def list_api_keys() -> List[dict]:
 
 
 # 创建内置的管理 key
-ADMIN_KEY = os.environ.get("MEMORY_ADMIN_KEY", "memory-admin-key")
+ADMIN_KEY = os.environ.get("CODEX_ADMIN_KEY", "codex-admin-key")
 print(f"[API] Admin key configured: {ADMIN_KEY[:10]}...")

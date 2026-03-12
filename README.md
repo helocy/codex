@@ -1,6 +1,6 @@
-# Memory - 本地 AI 智能笔记系统
+# Codex - 本地 AI 智能笔记系统
 
-Memory 是一个基于 RAG（检索增强生成）技术的本地知识库管理系统，支持文档上传、向量化存储、语义搜索和智能对话。
+Codex 是一个基于 RAG（检索增强生成）技术的本地知识库管理系统，支持文档上传、向量化存储、语义搜索和智能对话。
 
 ## ✨ 核心特性
 
@@ -17,8 +17,8 @@ Memory 是一个基于 RAG（检索增强生成）技术的本地知识库管理
 ### 一键部署
 
 ```bash
-git clone <repo-url> memory
-cd memory
+git clone <repo-url> codex
+cd codex
 bash deploy.sh
 ```
 
@@ -92,7 +92,7 @@ bash start.sh
 
 - [快速启动指南](docs/QUICKSTART.md) - 部署、配置和使用说明
 - [产品需求与架构白皮书](docs/产品需求与架构白皮书.md) - 详细的技术架构和设计思路
-- [API 使用指南](skills/memory.md) - API 调用示例和 Skill 集成
+- [API 使用指南](skills/codex.md) - API 调用示例和 Skill 集成
 
 ## 🔧 配置说明
 

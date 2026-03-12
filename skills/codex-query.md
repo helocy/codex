@@ -1,4 +1,4 @@
-name: memory-query
+name: codex-query
 description: Query and chat with the user's local knowledge base. Use this when you need to search the user's documents, notes, or any uploaded knowledge.
 version: "1.0"
 
@@ -33,7 +33,7 @@ api:
   base_url: http://localhost:8001
   auth:
     type: bearer
-    key: memory-admin-key
+    key: codex-admin-key
   endpoints:
     search:
       path: /api/v1/api/search

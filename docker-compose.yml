@@ -4,17 +4,17 @@ services:
   # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
-    container_name: memory-postgres
+    container_name: codex-postgres
     environment:
-      POSTGRES_USER: memory
-      POSTGRES_PASSWORD: memory123
-      POSTGRES_DB: memory_db
+      POSTGRES_USER: codex
+      POSTGRES_PASSWORD: codex123
+      POSTGRES_DB: codex_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U memory"]
+      test: ["CMD-SHELL", "pg_isready -U codex"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,14 +22,14 @@ services:
   # FastAPI 后端
   backend:
     build: ./backend
-    container_name: memory-backend
+    container_name: codex-backend
     ports:
       - "8001:8001"
     environment:
       POSTGRES_SERVER: postgres
-      POSTGRES_USER: memory
-      POSTGRES_PASSWORD: memory123
-      POSTGRES_DB: memory_db
+      POSTGRES_USER: codex
+      POSTGRES_PASSWORD: codex123
+      POSTGRES_DB: codex_db
       POSTGRES_PORT: 5432
     volumes:
       - ./backend:/app
@@ -42,7 +42,7 @@ services:
   # React 前端
   frontend:
     build: ./frontend
-    container_name: memory-frontend
+    container_name: codex-frontend
     ports:
       - "5173:5173"
     volumes:

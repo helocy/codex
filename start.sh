@@ -57,6 +57,12 @@ echo "前端 PID: $FRONTEND_PID"
 echo ""
 echo "=== 服务已启动 ==="
 echo "前端:    http://localhost:5173"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
+else
+    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+fi
+[ -n "$LAN_IP" ] && echo "局域网:  http://${LAN_IP}:5173"
 echo "后端:    http://localhost:8001"
 echo "API文档: http://localhost:8001/docs"
 echo ""

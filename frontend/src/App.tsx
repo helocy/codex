@@ -722,11 +722,11 @@ function App() {
                 </>
               )}
 
-              {/* 原始文档搜索路径 */}
-              <div className="bg-white rounded-2xl p-6 shadow-md">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
-                <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
-                {isLocalhost && (
+              {/* 原始文档搜索路径 (localhost only) */}
+              {isLocalhost && (
+                <div className="bg-white rounded-2xl p-6 shadow-md">
+                  <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
+                  <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
                   <div className="flex gap-2 mb-4">
                     <input
                       type="text"
@@ -743,27 +743,25 @@ function App() {
                       添加
                     </button>
                   </div>
-                )}
-                {originalDocPaths.length === 0 ? (
-                  <p className="text-sm text-gray-400">尚未配置搜索路径</p>
-                ) : (
-                  <div className="space-y-2">
-                    {originalDocPaths.map((path) => (
-                      <div key={path} className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-lg">
-                        <span className="text-sm text-gray-700 font-mono truncate flex-1">{path}</span>
-                        {isLocalhost && (
+                  {originalDocPaths.length === 0 ? (
+                    <p className="text-sm text-gray-400">尚未配置搜索路径</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {originalDocPaths.map((path) => (
+                        <div key={path} className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-lg">
+                          <span className="text-sm text-gray-700 font-mono truncate flex-1">{path}</span>
                           <button
                             onClick={() => handleRemoveDocPath(path)}
                             className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
                           >
                             删除
                           </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {dbStats && Object.keys(dbStats.type_counts).length > 0 && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">

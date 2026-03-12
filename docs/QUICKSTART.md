@@ -15,7 +15,7 @@
 
 ```bash
 # 1. 获取代码
-git clone <repo-url> codex
+git clone https://github.com/helocy/codex.git codex
 cd codex
 
 # 2. 执行部署脚本（自动安装所有依赖）
@@ -275,7 +275,7 @@ tail -50 backend/backend.log
 
 确认后端已启动：
 ```bash
-curl --noproxy localhost http://localhost:8001/chat/config
+curl --noproxy localhost http://localhost:8001/health
 ```
 
 如果使用了系统代理，可能需要将 `localhost` 加入代理排除列表。
@@ -305,7 +305,36 @@ bash start.sh
 
 ---
 
-## 十、更新依赖
+## 十、外部 API（AI Agent 集成）
+
+Codex 提供 REST API，可供外部系统或 AI Agent 直接调用。
+
+### 认证
+
+所有 API 请求需在请求头中携带 API Key：
+
+```
+Authorization: <API_KEY>
+```
+
+默认管理 Key 为 `codex-admin-key`，可通过环境变量 `CODEX_ADMIN_KEY` 修改。
+
+### 接口列表
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/api/health` | 健康检查 |
+| GET | `/api/v1/api/stats` | 知识库统计信息 |
+| POST | `/api/v1/api/search` | 搜索知识库 |
+| POST | `/api/v1/api/chat` | 对话（支持 RAG） |
+| GET | `/api/v1/api/documents` | 获取文档列表 |
+| GET | `/api/v1/api/documents/{id}` | 获取文档详情 |
+
+详细接口说明见 [API.md](API.md)
+
+---
+
+## 十一、更新依赖
 
 ```bash
 # 更新 Python 依赖

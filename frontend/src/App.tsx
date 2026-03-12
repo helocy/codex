@@ -433,6 +433,8 @@ function App() {
     chat: '💬 对话', memory: '💾 记忆', config: '⚙️ 配置',
   };
 
+  const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
   const actionBtn = (onClick: () => void, children: React.ReactNode, label: string) => (
     <button
       onClick={onClick}
@@ -608,135 +610,140 @@ function App() {
                 ))}
               </div>
 
-              {/* LLM Config */}
-              <div className="bg-white rounded-2xl p-8 shadow-md">
-                <h2 className="text-xl font-bold text-gray-900 mb-5">大模型配置</h2>
-                <div className="space-y-4">
-                  {[
-                    { label: 'API Base URL', key: 'base_url', type: 'text', placeholder: '例如: https://ark.cn-beijing.volces.com/api/v3' },
-                    { label: 'API Key', key: 'api_key', type: 'password', placeholder: '输入 API Key' },
-                    { label: '模型名称', key: 'model', type: 'text', placeholder: '例如: doubao-pro-4k, gpt-4o, qwen-plus' },
-                  ].map(f => (
-                    <div key={f.key}>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
-                      <input type={f.type} value={(llmConfig as any)[f.key] || ''}
-                        onChange={(e) => setLlmConfig({ ...llmConfig, [f.key]: e.target.value })}
-                        placeholder={f.placeholder}
-                        className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
-                    </div>
-                  ))}
-                  <button onClick={handleSaveLLMConfig}
-                    className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
-                  {llmConfigured && <div className="text-sm text-green-600 text-center">✓ LLM 已配置</div>}
-                  {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
-                </div>
-              </div>
-
-              {/* Embedding Config */}
-              <div className="bg-white rounded-2xl p-8 shadow-md">
-                <h2 className="text-xl font-bold text-gray-900 mb-5">嵌入模型配置</h2>
-                {dbStats && (
-                  <div className="flex items-center gap-3 mb-5 pb-5 border-b border-gray-100">
-                    <span className="text-sm text-gray-500">当前使用：</span>
-                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
-                      {dbStats.embedding_provider === 'local' ? '本地模型' :
-                       dbStats.embedding_provider === 'doubao' ? '豆包 Embedding' : '云端 API'}
-                    </span>
-                    <span className="text-gray-700 font-mono text-sm">{dbStats.embedding_model}</span>
-                  </div>
-                )}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">模型提供商</label>
-                    <select value={embeddingConfig.provider}
-                      onChange={(e) => {
-                        const newProvider = e.target.value;
-                        const defaultModels: Record<string, string> = {
-                          'local': 'paraphrase-multilingual-MiniLM-L12-v2',
-                          'doubao': 'doubao-embedding-vision-251215',
-                          'openai': 'text-embedding-3-small'
-                        };
-                        setEmbeddingConfig({
-                          ...embeddingConfig,
-                          provider: newProvider,
-                          model: defaultModels[newProvider] || embeddingConfig.model
-                        });
-                      }}
-                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none">
-                      <option value="local">本地模型 (sentence-transformers)</option>
-                      <option value="doubao">豆包 Embedding</option>
-                      <option value="openai">云端 API (OpenAI 兼容)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">模型名称</label>
-                    <input type="text" value={embeddingConfig.model}
-                      onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, model: e.target.value })}
-                      placeholder={
-                        embeddingConfig.provider === 'local' ? '例如: paraphrase-multilingual-MiniLM-L12-v2' :
-                        embeddingConfig.provider === 'doubao' ? '例如: doubao-embedding-vision-251215' :
-                        '例如: text-embedding-3-small'
-                      }
-                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
-                    {embeddingConfig.provider === 'local' && (
-                      <p className="text-xs text-gray-500 mt-1">推荐: paraphrase-multilingual-MiniLM-L12-v2, BAAI/bge-small-zh-v1.5</p>
-                    )}
-                    {embeddingConfig.provider === 'doubao' && (
-                      <p className="text-xs text-gray-500 mt-1">推荐: doubao-embedding-vision-251215</p>
-                    )}
-                  </div>
-
-                  {(embeddingConfig.provider === 'openai' || embeddingConfig.provider === 'doubao') && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
-                        <input type="password" value={embeddingConfig.api_key || ''}
-                          onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, api_key: e.target.value })}
-                          placeholder="输入 API Key"
-                          className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
-                      </div>
-                      {embeddingConfig.provider === 'openai' && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Base URL (可选)</label>
-                          <input type="text" value={embeddingConfig.base_url || ''}
-                            onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, base_url: e.target.value })}
-                            placeholder="例如: https://api.openai.com/v1"
+              {/* LLM + Embedding Config (localhost only) */}
+              {isLocalhost && (
+                <>
+                  <div className="bg-white rounded-2xl p-8 shadow-md">
+                    <h2 className="text-xl font-bold text-gray-900 mb-5">大模型配置</h2>
+                    <div className="space-y-4">
+                      {[
+                        { label: 'API Base URL', key: 'base_url', type: 'text', placeholder: '例如: https://ark.cn-beijing.volces.com/api/v3' },
+                        { label: 'API Key', key: 'api_key', type: 'password', placeholder: '输入 API Key' },
+                        { label: '模型名称', key: 'model', type: 'text', placeholder: '例如: doubao-pro-4k, gpt-4o, qwen-plus' },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
+                          <input type={f.type} value={(llmConfig as any)[f.key] || ''}
+                            onChange={(e) => setLlmConfig({ ...llmConfig, [f.key]: e.target.value })}
+                            placeholder={f.placeholder}
                             className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
                         </div>
-                      )}
-                    </>
-                  )}
-
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                    <p className="text-sm text-amber-800">⚠️ 更换嵌入模型后，需要重置知识库并重新上传文档，否则新旧向量不兼容</p>
+                      ))}
+                      <button onClick={handleSaveLLMConfig}
+                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
+                      {llmConfigured && <div className="text-sm text-green-600 text-center">✓ LLM 已配置</div>}
+                      {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
+                    </div>
                   </div>
 
-                  <button onClick={handleSaveEmbeddingConfig}
-                    className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
-                </div>
-              </div>
+                  <div className="bg-white rounded-2xl p-8 shadow-md">
+                    <h2 className="text-xl font-bold text-gray-900 mb-5">嵌入模型配置</h2>
+                    {dbStats && (
+                      <div className="flex items-center gap-3 mb-5 pb-5 border-b border-gray-100">
+                        <span className="text-sm text-gray-500">当前使用：</span>
+                        <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                          {dbStats.embedding_provider === 'local' ? '本地模型' :
+                           dbStats.embedding_provider === 'doubao' ? '豆包 Embedding' : '云端 API'}
+                        </span>
+                        <span className="text-gray-700 font-mono text-sm">{dbStats.embedding_model}</span>
+                      </div>
+                    )}
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">模型提供商</label>
+                        <select value={embeddingConfig.provider}
+                          onChange={(e) => {
+                            const newProvider = e.target.value;
+                            const defaultModels: Record<string, string> = {
+                              'local': 'paraphrase-multilingual-MiniLM-L12-v2',
+                              'doubao': 'doubao-embedding-vision-251215',
+                              'openai': 'text-embedding-3-small'
+                            };
+                            setEmbeddingConfig({
+                              ...embeddingConfig,
+                              provider: newProvider,
+                              model: defaultModels[newProvider] || embeddingConfig.model
+                            });
+                          }}
+                          className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none">
+                          <option value="local">本地模型 (sentence-transformers)</option>
+                          <option value="doubao">豆包 Embedding</option>
+                          <option value="openai">云端 API (OpenAI 兼容)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">模型名称</label>
+                        <input type="text" value={embeddingConfig.model}
+                          onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, model: e.target.value })}
+                          placeholder={
+                            embeddingConfig.provider === 'local' ? '例如: paraphrase-multilingual-MiniLM-L12-v2' :
+                            embeddingConfig.provider === 'doubao' ? '例如: doubao-embedding-vision-251215' :
+                            '例如: text-embedding-3-small'
+                          }
+                          className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                        {embeddingConfig.provider === 'local' && (
+                          <p className="text-xs text-gray-500 mt-1">推荐: paraphrase-multilingual-MiniLM-L12-v2, BAAI/bge-small-zh-v1.5</p>
+                        )}
+                        {embeddingConfig.provider === 'doubao' && (
+                          <p className="text-xs text-gray-500 mt-1">推荐: doubao-embedding-vision-251215</p>
+                        )}
+                      </div>
+
+                      {(embeddingConfig.provider === 'openai' || embeddingConfig.provider === 'doubao') && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+                            <input type="password" value={embeddingConfig.api_key || ''}
+                              onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, api_key: e.target.value })}
+                              placeholder="输入 API Key"
+                              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                          </div>
+                          {embeddingConfig.provider === 'openai' && (
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Base URL (可选)</label>
+                              <input type="text" value={embeddingConfig.base_url || ''}
+                                onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, base_url: e.target.value })}
+                                placeholder="例如: https://api.openai.com/v1"
+                                className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <p className="text-sm text-amber-800">⚠️ 更换嵌入模型后，需要重置知识库并重新上传文档，否则新旧向量不兼容</p>
+                      </div>
+
+                      <button onClick={handleSaveEmbeddingConfig}
+                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* 原始文档搜索路径 */}
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
                 <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    value={newDocPath}
-                    onChange={(e) => setNewDocPath(e.target.value)}
-                    placeholder="输入本地路径，如 /Users/yzc/docs"
-                    className="flex-1 px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
-                  />
-                  <button
-                    onClick={handleAddDocPath}
-                    disabled={!newDocPath.trim()}
-                    className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    添加
-                  </button>
-                </div>
+                {isLocalhost && (
+                  <div className="flex gap-2 mb-4">
+                    <input
+                      type="text"
+                      value={newDocPath}
+                      onChange={(e) => setNewDocPath(e.target.value)}
+                      placeholder="输入本地路径，如 /Users/yzc/docs"
+                      className="flex-1 px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
+                    />
+                    <button
+                      onClick={handleAddDocPath}
+                      disabled={!newDocPath.trim()}
+                      className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      添加
+                    </button>
+                  </div>
+                )}
                 {originalDocPaths.length === 0 ? (
                   <p className="text-sm text-gray-400">尚未配置搜索路径</p>
                 ) : (
@@ -744,12 +751,14 @@ function App() {
                     {originalDocPaths.map((path) => (
                       <div key={path} className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-lg">
                         <span className="text-sm text-gray-700 font-mono truncate flex-1">{path}</span>
-                        <button
-                          onClick={() => handleRemoveDocPath(path)}
-                          className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
-                        >
-                          删除
-                        </button>
+                        {isLocalhost && (
+                          <button
+                            onClick={() => handleRemoveDocPath(path)}
+                            className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
+                          >
+                            删除
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -778,14 +787,18 @@ function App() {
                   className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium">
                   📥 导出备份
                 </button>
-                <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
-                  📤 导入备份
-                  <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-                </label>
-                <button onClick={handleReset}
-                  className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium ml-auto">
-                  🗑 重置知识库
-                </button>
+                {isLocalhost && (
+                  <>
+                    <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
+                      📤 导入备份
+                      <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                    </label>
+                    <button onClick={handleReset}
+                      className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium ml-auto">
+                      🗑 重置知识库
+                    </button>
+                  </>
+                )}
               </div>
 
               {adminMessage && (
@@ -853,10 +866,12 @@ function App() {
                                 <p className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleString()}</p>
                               </div>
                             </div>
-                            <button onClick={() => handleDeleteDocument(doc)}
-                              className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
-                              删除
-                            </button>
+                            {isLocalhost && (
+                              <button onClick={() => handleDeleteDocument(doc)}
+                                className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
+                                删除
+                              </button>
+                            )}
                           </div>
                         );
                       })}

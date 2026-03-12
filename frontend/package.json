@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "author": "zhichao.yu",
+  "author": "Zhichao",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

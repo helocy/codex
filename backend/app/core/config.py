@@ -5,7 +5,7 @@ from typing import Optional
 class Settings(BaseSettings):
     # 项目信息
     PROJECT_NAME: str = "Codex"
-    VERSION: str = "0.2.3"
+    VERSION: str = "0.3.0"
     API_V1_STR: str = "/api/v1"
 
     # 数据库配置

@@ -6,9 +6,10 @@
 
 set -e
 
-REPO_URL="https://github.com/helocy/codex.git"
+REPO_URL="${CODEX_REPO_URL:-https://github.com/helocy/codex.git}"
 REPO_URL_SSH="git@github.com:helocy/codex.git"
-INSTALL_DIR="${HOME}/codex"
+REPO_URL_GITEE="https://gitee.com/helocy/codex.git"
+INSTALL_DIR="${CODEX_INSTALL_DIR:-${HOME}/codex}"
 
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -59,10 +60,21 @@ if [[ -d "${INSTALL_DIR}/.git" ]]; then
     git pull --ff-only origin main 2>/dev/null || git pull origin main
 else
     echo -e "${BLUE}[INFO]${NC}  克隆 Codex 仓库到 ${INSTALL_DIR} ..."
-    # 尝试 HTTPS，如果失败则尝试 SSH
-    if ! git clone "$REPO_URL" "$INSTALL_DIR" 2>/dev/null; then
-        echo -e "${YELLOW}[WARN]${NC}  HTTPS 克隆失败，尝试使用 SSH..."
-        git clone "$REPO_URL_SSH" "$INSTALL_DIR"
+    # 尝试多个源：HTTPS -> Gitee -> SSH
+    if git clone "$REPO_URL" "$INSTALL_DIR" 2>/dev/null; then
+        echo -e "${GREEN}[OK]${NC}    使用 GitHub HTTPS 克隆成功"
+    elif git clone "$REPO_URL_GITEE" "$INSTALL_DIR" 2>/dev/null; then
+        echo -e "${GREEN}[OK]${NC}    使用 Gitee 镜像克隆成功"
+    elif git clone "$REPO_URL_SSH" "$INSTALL_DIR" 2>/dev/null; then
+        echo -e "${GREEN}[OK]${NC}    使用 SSH 克隆成功"
+    else
+        echo -e "${YELLOW}[ERROR]${NC} 所有克隆方式均失败"
+        echo ""
+        echo "请尝试以下方法："
+        echo "  1. 手动克隆: git clone https://github.com/helocy/codex.git ~/codex"
+        echo "  2. 使用 Gitee 镜像: CODEX_REPO_URL=https://gitee.com/helocy/codex.git bash install.sh"
+        echo "  3. 配置代理后重试"
+        exit 1
     fi
     cd "$INSTALL_DIR"
 fi

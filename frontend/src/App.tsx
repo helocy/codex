@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath } from './services/api';
 import MarkdownRenderer from './components/MarkdownRenderer';
+import { useTranslation } from './i18n/useTranslation';
 import './index.css';
 
 type Mode = 'memory' | 'chat' | 'config';
@@ -78,6 +79,7 @@ function parseThinking(content: string): { thinking: string | null; answer: stri
 }
 
 function App() {
+  const { t, language, switchLanguage } = useTranslation();
   const [mode, setMode] = useState<Mode>('chat');  // 默认显示对话界面
   const [query, setQuery] = useState('');
   const [textContent, setTextContent] = useState('');  // 记忆页面的文本输入
@@ -101,7 +103,6 @@ function App() {
   };
 
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(getSavedConfig());
-  const [llmConfigured, setLlmConfigured] = useState(false);
   const [embeddingConfig, setEmbeddingConfig] = useState<EmbeddingConfig>({ provider: 'local', model: 'paraphrase-multilingual-MiniLM-L12-v2' });
   const [documents, setDocuments] = useState<any[]>([]);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
@@ -148,7 +149,7 @@ function App() {
   }, [mode]);
 
   const loadLLMConfig = async () => {
-    try { const c = await getLLMConfig(); setLlmConfigured(c.configured); } catch {}
+    try { await getLLMConfig(); } catch {}
   };
 
   const loadEmbeddingConfig = async () => {
@@ -180,9 +181,9 @@ function App() {
       await addOriginalDocPath(newDocPath.trim());
       setNewDocPath('');
       loadOriginalDocPaths();
-      setAdminMessage('✓ 路径添加成功');
+      setAdminMessage(`${t.msgSuccess} ${t.msgPathAdded}`);
     } catch (e: any) {
-      setAdminMessage('✗ ' + (e.response?.data?.detail || e.message));
+      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     }
   };
 
@@ -190,9 +191,9 @@ function App() {
     try {
       await removeOriginalDocPath(path);
       loadOriginalDocPaths();
-      setAdminMessage('✓ 路径已移除');
+      setAdminMessage(`${t.msgSuccess} ${t.msgPathRemoved}`);
     } catch (e: any) {
-      setAdminMessage('✗ ' + (e.response?.data?.detail || e.message));
+      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     }
   };
 
@@ -212,39 +213,45 @@ function App() {
   };
 
   const handleDeleteDocument = (doc: any) => {
-    showConfirm('删除文档', `确定要删除「${doc.title}」吗？此操作不可撤销，相关的向量数据也将一并删除。`, async () => {
+    showConfirm(t.dialogDeleteTitle, t.dialogDeleteMessage.replace('{title}', doc.title), async () => {
       setConfirm(p => ({ ...p, visible: false }));
       try {
         await deleteDocument(doc.id);
-        setAdminMessage(`✓ 已删除文档：${doc.title}`);
+        setAdminMessage(`${t.msgSuccess} ${t.msgDeleteSuccess}：${doc.title}`);
         await loadDocuments(); await loadDbStats();
-      } catch (e: any) { setAdminMessage(`✗ 删除失败：${e.response?.data?.detail || e.message}`); }
+      } catch (e: any) { setAdminMessage(`${t.msgError} ${language === 'zh' ? '删除失败' : 'Delete failed'}：${e.response?.data?.detail || e.message}`); }
     });
   };
 
   const handleReset = () => {
-    showConfirm('重置知识库', '确定要清空所有数据吗？包括全部文档和向量索引，此操作不可撤销！', async () => {
+    showConfirm(t.dialogResetTitle, t.dialogResetMessage, async () => {
       setConfirm(p => ({ ...p, visible: false }));
       try {
         await resetDatabase();
-        setAdminMessage('✓ 知识库已重置，所有数据已清空');
+        setAdminMessage(`${t.msgSuccess} ${t.msgResetSuccess}`);
         await loadDocuments(); await loadDbStats();
-      } catch (e: any) { setAdminMessage(`✗ 重置失败：${e.response?.data?.detail || e.message}`); }
+      } catch (e: any) { setAdminMessage(`${t.msgError} ${language === 'zh' ? '重置失败' : 'Reset failed'}：${e.response?.data?.detail || e.message}`); }
     });
   };
 
   const handleExport = async () => {
     if (!dbStats) {
-      setAdminMessage('请先加载统计信息');
+      setAdminMessage(language === 'zh' ? '请先加载统计信息' : 'Please load statistics first');
       return;
     }
 
     const estimatedSizeMB = Math.ceil(dbStats.chunk_count * 0.05); // 每个 chunk 约 50KB
     const estimatedMinutes = Math.ceil(dbStats.chunk_count / 100); // 约 100 chunks/分钟
 
+    const message = t.dialogExportMessage
+      .replace('{docCount}', dbStats.document_count.toString())
+      .replace('{chunkCount}', dbStats.chunk_count.toString())
+      .replace('{sizeMB}', estimatedSizeMB.toString())
+      .replace('{minutes}', estimatedMinutes.toString());
+
     showConfirm(
-      '导出数据库',
-      `即将导出 ${dbStats.document_count} 个文档和 ${dbStats.chunk_count} 个向量块。\n\n预估文件大小：约 ${estimatedSizeMB} MB\n预估耗时：约 ${estimatedMinutes} 分钟\n\n导出过程中请勿关闭页面。`,
+      t.dialogExportTitle,
+      message,
       async () => {
         setConfirm(p => ({ ...p, visible: false }));
         setExporting(true);
@@ -259,9 +266,9 @@ function App() {
           a.click();
           window.URL.revokeObjectURL(url);
           document.body.removeChild(a);
-          setAdminMessage('✓ 数据库导出成功');
+          setAdminMessage(`${t.msgSuccess} ${t.msgExportSuccess}`);
         } catch (e: any) {
-          setAdminMessage(`✗ 导出失败：${e.response?.data?.detail || e.message}`);
+          setAdminMessage(`${t.msgError} ${language === 'zh' ? '导出失败' : 'Export failed'}：${e.response?.data?.detail || e.message}`);
         } finally {
           setExporting(false);
         }
@@ -273,20 +280,20 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    showConfirm('导入数据库', '导入会添加备份文件中的所有文档到当前数据库。如果需要完全恢复备份，请先重置知识库。确定要继续吗？', async () => {
+    showConfirm(t.dialogImportTitle, t.dialogImportMessage, async () => {
       setConfirm(p => ({ ...p, visible: false }));
       try {
-        setAdminMessage('正在导入数据库...');
+        setAdminMessage(language === 'zh' ? '正在导入数据库...' : 'Importing database...');
         const result = await importDatabase(file);
-        setAdminMessage(`✓ 导入成功：${result.imported_documents} 个文档，${result.imported_chunks} 个文本块`);
+        setAdminMessage(`${t.msgSuccess} ${t.msgImportSuccess}：${result.imported_documents} ${language === 'zh' ? '个文档' : 'documents'}，${result.imported_chunks} ${language === 'zh' ? '个文本块' : 'chunks'}`);
         await loadDocuments(); await loadDbStats();
       } catch (e: any) {
         const errorDetail = e.response?.data?.detail || e.message;
         // 如果是 embedding 模型不匹配错误，显示完整的错误信息
-        if (errorDetail.includes('Embedding 模型不匹配')) {
-          setAdminMessage(`✗ ${errorDetail}`);
+        if (errorDetail.includes('Embedding') || errorDetail.includes('模型不匹配')) {
+          setAdminMessage(`${t.msgError} ${errorDetail}`);
         } else {
-          setAdminMessage(`✗ 导入失败：${errorDetail}`);
+          setAdminMessage(`${t.msgError} ${language === 'zh' ? '导入失败' : 'Import failed'}：${errorDetail}`);
         }
       }
     });
@@ -417,17 +424,17 @@ function App() {
     try {
       await configureLLM(llmConfig);
       localStorage.setItem('llm_config', JSON.stringify(llmConfig));
-      setMessage('✓ LLM 配置保存成功'); setLlmConfigured(true);
+      setMessage(`${t.msgSuccess} ${t.msgConfigSuccess}`);
       setTimeout(() => setMessage(''), 3000);
-    } catch (e: any) { setMessage(`✗ 配置失败: ${e.response?.data?.detail || e.message}`); }
+    } catch (e: any) { setMessage(`${t.msgError} ${language === 'zh' ? '配置失败' : 'Configuration failed'}: ${e.response?.data?.detail || e.message}`); }
   };
 
   const handleSaveEmbeddingConfig = async () => {
     try {
       const result = await configureEmbedding(embeddingConfig);
-      setMessage(`✓ 嵌入模型配置成功，向量维度: ${result.dimension}`);
+      setMessage(`${t.msgSuccess} ${language === 'zh' ? '嵌入模型配置成功，向量维度' : 'Embedding configured, dimension'}: ${result.dimension}`);
       setTimeout(() => setMessage(''), 3000);
-    } catch (e: any) { setMessage(`✗ 配置失败: ${e.response?.data?.detail || e.message}`); }
+    } catch (e: any) { setMessage(`${t.msgError} ${language === 'zh' ? '配置失败' : 'Configuration failed'}: ${e.response?.data?.detail || e.message}`); }
   };
 
   const getSubmitHandler = () => {
@@ -436,12 +443,12 @@ function App() {
   };
 
   const fileTypeLabel: Record<string, string> = {
-    markdown: '📝 Markdown', pdf: '📄 PDF', word: '📃 Word',
-    text: '📋 文本', audio: '🎵 音频', image: '🖼 图片', video: '🎬 视频',
+    markdown: t.fileTypeMarkdown, pdf: t.fileTypePdf, word: t.fileTypeWord,
+    text: t.fileTypeText, audio: t.fileTypeAudio, image: t.fileTypeImage, video: t.fileTypeVideo,
   };
 
   const modeLabels: Record<Mode, string> = {
-    chat: '💬 对话', memory: '💾 记忆', config: '⚙️ 配置',
+    chat: t.modeChat, memory: t.modeMemory, config: t.modeConfig,
   };
 
   const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -468,12 +475,12 @@ function App() {
               <div className="mb-4">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">正在导出数据库</h3>
-              <p className="text-gray-600 mb-4">正在生成备份文件，请稍候...</p>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">{t.exportingTitle}</h3>
+              <p className="text-gray-600 mb-4">{t.exportingMessage}</p>
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '100%' }}></div>
               </div>
-              <p className="text-sm text-gray-500 mt-4">请勿关闭页面</p>
+              <p className="text-sm text-gray-500 mt-4">{t.exportingWait}</p>
             </div>
           </div>
         </div>
@@ -484,12 +491,12 @@ function App() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <h3 className="text-xl font-bold text-gray-900 mb-3">{confirm.title}</h3>
-            <p className="text-gray-600 mb-6 leading-relaxed">{confirm.message}</p>
+            <p className="text-gray-600 mb-6 leading-relaxed whitespace-pre-wrap">{confirm.message}</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setConfirm(p => ({ ...p, visible: false }))}
-                className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">取消</button>
+                className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">{t.actionCancel}</button>
               <button onClick={confirm.onConfirm}
-                className="px-5 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors">确认</button>
+                className="px-5 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors">{t.actionConfirm}</button>
             </div>
           </div>
         </div>
@@ -497,7 +504,16 @@ function App() {
 
       {/* ===== Header (only title + tabs) ===== */}
       <header className="flex flex-col items-center pt-10 pb-0 px-8 shrink-0">
-        <h1 className="text-5xl font-bold text-gray-900 mb-8">Codex</h1>
+        <div className="flex items-center gap-4 mb-8">
+          <h1 className="text-5xl font-bold text-gray-900">{t.appName}</h1>
+          <button
+            onClick={() => switchLanguage(language === 'zh' ? 'en' : 'zh')}
+            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title={language === 'zh' ? 'Switch to English' : '切换到中文'}
+          >
+            {language === 'zh' ? 'EN' : '中文'}
+          </button>
+        </div>
         <div className="flex gap-3 flex-wrap justify-center">
           {(Object.keys(modeLabels) as Mode[]).map((m) => (
             <button key={m} onClick={() => setMode(m)}
@@ -517,7 +533,7 @@ function App() {
         >
           <div className="max-w-4xl mx-auto space-y-6">
             {chatMessages.length === 0 && (
-              <div className="text-center text-gray-400 mt-24 text-sm">开始和大模型对话吧 {useRag ? '（知识库模式）' : '（直接对话）'}</div>
+              <div className="text-center text-gray-400 mt-24 text-sm">{t.chatEmpty} {useRag ? t.chatEmptyRag : t.chatEmptyNoRag}</div>
             )}
 
             {chatMessages.map((msg, index) => (
@@ -530,7 +546,7 @@ function App() {
                       <>
                         {thinking && (
                           <div className="mb-3 pb-3 border-b border-gray-100">
-                            <p className="text-xs text-gray-400 mb-1 font-medium">思考过程</p>
+                            <p className="text-xs text-gray-400 mb-1 font-medium">{t.thinkingProcess}</p>
                             <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{thinking}</p>
                           </div>
                         )}
@@ -544,7 +560,7 @@ function App() {
                   )}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-gray-700">
-                      <p className="text-xs text-gray-400 mb-2">知识库来源：</p>
+                      <p className="text-xs text-gray-400 mb-2">{t.sourceKnowledgeBase}</p>
                       {msg.sources.map((s, i) => (
                         <div key={i} className="text-xs text-gray-300 mb-1">
                           • 文档 #{s.document_id} ({(s.similarity * 100).toFixed(0)}% 匹配)
@@ -559,7 +575,7 @@ function App() {
                   )}
                   {msg.webSources && msg.webSources.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-gray-700">
-                      <p className="text-xs text-gray-400 mb-2">网络来源：</p>
+                      <p className="text-xs text-gray-400 mb-2">{t.sourceWebSearch}</p>
                       {msg.webSources.map((s: any, i: number) => (
                         <div key={i} className="text-xs text-gray-300 mb-1">
                           • <a href={s.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{s.title}</a>
@@ -573,9 +589,9 @@ function App() {
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                   {actionBtn(() => handleCopy(msg.content, index),
                     copiedIdx === index ? <CheckIcon /> : <CopyIcon />,
-                    copiedIdx === index ? '已复制' : '复制'
+                    copiedIdx === index ? t.actionCopied : t.actionCopy
                   )}
-                  {msg.role === 'user' && actionBtn(() => handleResend(msg.content), <ResendIcon />, '重发')}
+                  {msg.role === 'user' && actionBtn(() => handleResend(msg.content), <ResendIcon />, t.actionResend)}
                 </div>
               </div>
             ))}
@@ -609,9 +625,9 @@ function App() {
               {/* Stats Cards */}
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  { label: '文档总数', value: statsLoading ? '...' : dbStats?.document_count ?? '-', icon: '📄' },
-                  { label: '向量块总数', value: statsLoading ? '...' : dbStats?.chunk_count ?? '-', icon: '🧩' },
-                  { label: '数据库大小', value: statsLoading ? '...' : dbStats?.db_size ?? '-', icon: '💾' },
+                  { label: t.configDocCount, value: statsLoading ? t.statsLoading : dbStats?.document_count ?? t.statsNoData, icon: '📄' },
+                  { label: t.configChunkCount, value: statsLoading ? t.statsLoading : dbStats?.chunk_count ?? t.statsNoData, icon: '🧩' },
+                  { label: t.configDbSize, value: statsLoading ? t.statsLoading : dbStats?.db_size ?? t.statsNoData, icon: '💾' },
                 ].map((card) => (
                   <div key={card.label} className="bg-white rounded-2xl p-6 shadow-md text-center">
                     <div className="text-3xl mb-2">{card.icon}</div>
@@ -625,12 +641,12 @@ function App() {
               {isLocalhost && (
                 <>
                   <div className="bg-white rounded-2xl p-8 shadow-md">
-                    <h2 className="text-xl font-bold text-gray-900 mb-5">大模型配置</h2>
+                    <h2 className="text-xl font-bold text-gray-900 mb-5">{t.configLlm}</h2>
                     <div className="space-y-4">
                       {[
-                        { label: 'API Base URL', key: 'base_url', type: 'text', placeholder: '例如: https://ark.cn-beijing.volces.com/api/v3' },
-                        { label: 'API Key', key: 'api_key', type: 'password', placeholder: '输入 API Key' },
-                        { label: '模型名称', key: 'model', type: 'text', placeholder: '例如: doubao-pro-4k, gpt-4o, qwen-plus' },
+                        { label: t.configLlmBaseUrl, key: 'base_url', type: 'text', placeholder: 'e.g. https://ark.cn-beijing.volces.com/api/v3' },
+                        { label: t.configLlmApiKey, key: 'api_key', type: 'password', placeholder: 'Enter API Key' },
+                        { label: t.configLlmModel, key: 'model', type: 'text', placeholder: 'e.g. doubao-pro-4k, gpt-4o, qwen-plus' },
                       ].map(f => (
                         <div key={f.key}>
                           <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
@@ -641,26 +657,26 @@ function App() {
                         </div>
                       ))}
                       <button onClick={handleSaveLLMConfig}
-                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
+                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">{t.actionSave}</button>
                       {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
                     </div>
                   </div>
 
                   <div className="bg-white rounded-2xl p-8 shadow-md">
-                    <h2 className="text-xl font-bold text-gray-900 mb-5">嵌入模型配置</h2>
+                    <h2 className="text-xl font-bold text-gray-900 mb-5">{t.configEmbedding}</h2>
                     {dbStats && (
                       <div className="flex items-center gap-3 mb-5 pb-5 border-b border-gray-100">
-                        <span className="text-sm text-gray-500">当前使用：</span>
+                        <span className="text-sm text-gray-500">{t.configEmbeddingCurrent}</span>
                         <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
-                          {dbStats.embedding_provider === 'local' ? '本地模型' :
-                           dbStats.embedding_provider === 'doubao' ? '豆包 Embedding' : '云端 API'}
+                          {dbStats.embedding_provider === 'local' ? t.embeddingLocal.split(' ')[0] :
+                           dbStats.embedding_provider === 'doubao' ? t.embeddingDoubao : t.embeddingOpenAI.split(' ')[0]}
                         </span>
                         <span className="text-gray-700 font-mono text-sm">{dbStats.embedding_model}</span>
                       </div>
                     )}
                     <div className="space-y-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">模型提供商</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">{t.configEmbeddingProvider}</label>
                         <select value={embeddingConfig.provider}
                           onChange={(e) => {
                             const newProvider = e.target.value;
@@ -676,45 +692,45 @@ function App() {
                             });
                           }}
                           className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none">
-                          <option value="local">本地模型 (sentence-transformers)</option>
-                          <option value="doubao">豆包 Embedding</option>
-                          <option value="openai">云端 API (OpenAI 兼容)</option>
+                          <option value="local">{t.embeddingLocal}</option>
+                          <option value="doubao">{t.embeddingDoubao}</option>
+                          <option value="openai">{t.embeddingOpenAI}</option>
                         </select>
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">模型名称</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">{t.configEmbeddingModel}</label>
                         <input type="text" value={embeddingConfig.model}
                           onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, model: e.target.value })}
                           placeholder={
-                            embeddingConfig.provider === 'local' ? '例如: paraphrase-multilingual-MiniLM-L12-v2' :
-                            embeddingConfig.provider === 'doubao' ? '例如: doubao-embedding-vision-251215' :
-                            '例如: text-embedding-3-small'
+                            embeddingConfig.provider === 'local' ? 'e.g. paraphrase-multilingual-MiniLM-L12-v2' :
+                            embeddingConfig.provider === 'doubao' ? 'e.g. doubao-embedding-vision-251215' :
+                            'e.g. text-embedding-3-small'
                           }
                           className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
                         {embeddingConfig.provider === 'local' && (
-                          <p className="text-xs text-gray-500 mt-1">推荐: paraphrase-multilingual-MiniLM-L12-v2, BAAI/bge-small-zh-v1.5</p>
+                          <p className="text-xs text-gray-500 mt-1">Recommended: paraphrase-multilingual-MiniLM-L12-v2, BAAI/bge-small-zh-v1.5</p>
                         )}
                         {embeddingConfig.provider === 'doubao' && (
-                          <p className="text-xs text-gray-500 mt-1">推荐: doubao-embedding-vision-251215</p>
+                          <p className="text-xs text-gray-500 mt-1">Recommended: doubao-embedding-vision-251215</p>
                         )}
                       </div>
 
                       {(embeddingConfig.provider === 'openai' || embeddingConfig.provider === 'doubao') && (
                         <>
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">{t.configLlmApiKey}</label>
                             <input type="password" value={embeddingConfig.api_key || ''}
                               onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, api_key: e.target.value })}
-                              placeholder="输入 API Key"
+                              placeholder="Enter API Key"
                               className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
                           </div>
                           {embeddingConfig.provider === 'openai' && (
                             <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Base URL (可选)</label>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">{t.configLlmBaseUrl} (Optional)</label>
                               <input type="text" value={embeddingConfig.base_url || ''}
                                 onChange={(e) => setEmbeddingConfig({ ...embeddingConfig, base_url: e.target.value })}
-                                placeholder="例如: https://api.openai.com/v1"
+                                placeholder="e.g. https://api.openai.com/v1"
                                 className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
                             </div>
                           )}
@@ -722,11 +738,11 @@ function App() {
                       )}
 
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                        <p className="text-sm text-amber-800">⚠️ 更换嵌入模型后，需要重置知识库并重新上传文档，否则新旧向量不兼容</p>
+                        <p className="text-sm text-amber-800">{t.configEmbeddingWarning}</p>
                       </div>
 
                       <button onClick={handleSaveEmbeddingConfig}
-                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
+                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">{t.actionSave}</button>
                     </div>
                   </div>
                 </>
@@ -735,14 +751,14 @@ function App() {
               {/* 原始文档搜索路径 (localhost only) */}
               {isLocalhost && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">原始文档搜索路径</h3>
-                  <p className="text-xs text-gray-400 mb-4">配置本地路径，匹配知识库后会优先查找原始文档内容</p>
+                  <h3 className="text-lg font-bold text-gray-900 mb-1">{t.configOriginalDocPath}</h3>
+                  <p className="text-xs text-gray-400 mb-4">{t.configOriginalDocPathDesc}</p>
                   <div className="flex gap-2 mb-4">
                     <input
                       type="text"
                       value={newDocPath}
                       onChange={(e) => setNewDocPath(e.target.value)}
-                      placeholder="输入本地路径，如 /Users/yzc/docs"
+                      placeholder={t.configOriginalDocPathPlaceholder}
                       className="flex-1 px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
                     />
                     <button
@@ -750,11 +766,11 @@ function App() {
                       disabled={!newDocPath.trim()}
                       className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      添加
+                      {t.actionAdd}
                     </button>
                   </div>
                   {originalDocPaths.length === 0 ? (
-                    <p className="text-sm text-gray-400">尚未配置搜索路径</p>
+                    <p className="text-sm text-gray-400">{t.configOriginalDocPathEmpty}</p>
                   ) : (
                     <div className="space-y-2">
                       {originalDocPaths.map((path) => (
@@ -764,7 +780,7 @@ function App() {
                             onClick={() => handleRemoveDocPath(path)}
                             className="ml-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded"
                           >
-                            删除
+                            {t.actionDelete}
                           </button>
                         </div>
                       ))}
@@ -775,11 +791,11 @@ function App() {
 
               {dbStats && Object.keys(dbStats.type_counts).length > 0 && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">文档类型分布</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">{t.configDocTypes}</h3>
                   <div className="flex flex-wrap gap-3">
                     {Object.entries(dbStats.type_counts).map(([type, count]) => (
                       <span key={type} className="px-4 py-2 bg-gray-100 rounded-full text-sm text-gray-700">
-                        {fileTypeLabel[type] || type}：{count} 篇
+                        {fileTypeLabel[type] || type}：{count} {language === 'zh' ? '篇' : ''}
                       </span>
                     ))}
                   </div>
@@ -789,21 +805,21 @@ function App() {
               <div className="flex gap-3">
                 <button onClick={loadDbStats}
                   className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors text-sm font-medium">
-                  🔄 刷新统计
+                  {t.actionRefresh}
                 </button>
                 <button onClick={handleExport}
                   className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium">
-                  📥 导出备份
+                  {t.actionExport}
                 </button>
                 {isLocalhost && (
                   <>
                     <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
-                      📤 导入备份
+                      {t.actionImport}
                       <input type="file" accept=".json" onChange={handleImport} className="hidden" />
                     </label>
                     <button onClick={handleReset}
                       className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium ml-auto">
-                      🗑 重置知识库
+                      {t.actionReset}
                     </button>
                   </>
                 )}
@@ -818,29 +834,29 @@ function App() {
               <div className="bg-white rounded-2xl shadow-md overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-4">
                   <h3 className="text-lg font-bold text-gray-900 shrink-0">
-                    文档列表（{docSearch.trim()
+                    {t.configDocSearch}（{docSearch.trim()
                       ? `${documents.filter(d => d.title.toLowerCase().includes(docSearch.toLowerCase())).length} / ${documents.length}`
-                      : documents.length} 篇）
+                      : documents.length} {language === 'zh' ? '篇' : ''}）
                   </h3>
                   <input
                     type="text"
                     value={docSearch}
                     onChange={(e) => setDocSearch(e.target.value)}
-                    placeholder="搜索文档名..."
+                    placeholder={t.configDocSearchPlaceholder}
                     className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:border-gray-400 outline-none"
                   />
                   {docSearch && (
-                    <button onClick={() => setDocSearch('')} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">清除</button>
+                    <button onClick={() => setDocSearch('')} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">{t.actionClear}</button>
                   )}
                 </div>
                 {documents.length === 0 ? (
-                  <div className="text-center text-gray-400 py-12">暂无文档</div>
+                  <div className="text-center text-gray-400 py-12">{language === 'zh' ? '暂无文档' : 'No documents'}</div>
                 ) : (() => {
                   const filtered = docSearch.trim()
                     ? documents.filter(d => d.title.toLowerCase().includes(docSearch.toLowerCase()))
                     : documents;
                   return filtered.length === 0 ? (
-                    <div className="text-center text-gray-400 py-12">无匹配文档</div>
+                    <div className="text-center text-gray-400 py-12">{language === 'zh' ? '无匹配文档' : 'No matching documents'}</div>
                   ) : (
                     <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
                       {filtered.map((doc) => {
@@ -877,7 +893,7 @@ function App() {
                             {isLocalhost && (
                               <button onClick={() => handleDeleteDocument(doc)}
                                 className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
-                                删除
+                                {t.actionDelete}
                               </button>
                             )}
                           </div>
@@ -895,22 +911,22 @@ function App() {
             <div className="w-full max-w-4xl space-y-6">
               {/* 文本输入区域 */}
               <div className="bg-white rounded-2xl p-6 shadow-md">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">直接输入文本</h3>
-                <p className="text-xs text-gray-400 mb-3">直接输入或粘贴文本内容，保存到知识库</p>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">{t.memoryTextInput}</h3>
+                <p className="text-xs text-gray-400 mb-3">{t.memoryTextInputDesc}</p>
                 <form onSubmit={handleTextSubmit}>
                   <div className="space-y-3">
                     <input
                       type="text"
                       value={textTitle}
                       onChange={(e) => setTextTitle(e.target.value)}
-                      placeholder="输入标题（可选）"
+                      placeholder={t.memoryTitlePlaceholder}
                       className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm"
                       disabled={uploading}
                     />
                     <textarea
                       value={textContent}
                       onChange={(e) => setTextContent(e.target.value)}
-                      placeholder="在此输入或粘贴要保存的文本内容..."
+                      placeholder={t.memoryContentPlaceholder}
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm resize-none"
                       rows={5}
                       disabled={uploading}
@@ -920,15 +936,15 @@ function App() {
                       disabled={uploading || !textContent.trim()}
                       className="px-6 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
-                      {uploading ? '保存中...' : '保存到知识库'}
+                      {uploading ? t.actionSaving : t.memorySaveToKb}
                     </button>
                   </div>
                 </form>
               </div>
 
               <div className="bg-white rounded-2xl p-6 shadow-md">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">上传文档到知识库</h3>
-                <p className="text-xs text-gray-400 mb-5">支持 Markdown（感知分块）和 PDF（按页分块），上传后自动向量化</p>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">{t.memoryUploadTitle}</h3>
+                <p className="text-xs text-gray-400 mb-5">{t.memoryUploadDesc}</p>
 
                 {/* 上传选项 */}
                 <div className="mb-4 space-y-2">
@@ -939,7 +955,7 @@ function App() {
                       onChange={(e) => setForceUpload(e.target.checked)}
                       className="w-4 h-4 rounded border-gray-300"
                     />
-                    强制上传（跳过相似文档检测）
+                    {t.memoryForceUpload}
                   </label>
                   <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                     <input
@@ -948,14 +964,14 @@ function App() {
                       onChange={(e) => setOverwriteUpload(e.target.checked)}
                       className="w-4 h-4 rounded border-gray-300"
                     />
-                    覆盖上传（覆盖同名文档）
+                    {t.memoryOverwriteUpload}
                   </label>
                 </div>
 
                 {/* 单文件上传 */}
                 <div className="mb-5">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    单个文件
+                    {t.memoryUploadSingle}
                     <span className="ml-2 text-xs font-normal text-gray-400">.md · .pdf</span>
                   </label>
                   <input type="file" accept=".md,.pdf" disabled={uploading}
@@ -966,8 +982,8 @@ function App() {
                 {/* 目录批量上传 */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    批量上传目录
-                    <span className="ml-2 text-xs font-normal text-gray-400">自动扫描目录下所有 .md 和 .pdf 文件</span>
+                    {t.memoryUploadBatch}
+                    <span className="ml-2 text-xs font-normal text-gray-400">{t.memoryUploadBatchDesc}</span>
                   </label>
                   <input type="file" {...{ webkitdirectory: "true", directory: "true" } as any} onChange={handleDirectoryUpload} disabled={uploading}
                     className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 disabled:opacity-50" />
@@ -977,12 +993,12 @@ function App() {
               {(uploading || uploadDone) && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
                   <h3 className="text-lg font-bold text-gray-900 mb-4">
-                    {uploading ? '上传进度' : '上传结果'}
+                    {uploading ? t.memoryUploadProgress : t.memoryUploadResult}
                   </h3>
                   {uploadTotal > 0 && (
                     <div className="mb-4">
                       <div className="flex justify-between text-sm text-gray-600 mb-1">
-                        <span>{uploading ? '正在处理...' : '已完成'}</span>
+                        <span>{uploading ? (language === 'zh' ? '正在处理...' : 'Processing...') : (language === 'zh' ? '已完成' : 'Completed')}</span>
                         <span>{uploadProgress}/{uploadTotal}</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2.5">
@@ -1001,7 +1017,7 @@ function App() {
 
               {documents.length > 0 && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">已上传文档 ({documents.length})</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">{t.memoryDocumentList} ({documents.length})</h3>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {documents.map((doc) => (
                       <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -1045,8 +1061,8 @@ function App() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={
-                    mode === 'chat' ? (useRag ? '向你的知识库提问...' : '和大模型聊天...') :
-                    '记录新的想法...'
+                    mode === 'chat' ? (useRag ? t.chatPlaceholder : t.chatPlaceholderNoRag) :
+                    (language === 'zh' ? '记录新的想法...' : 'Record new idea...')
                   }
                   className="w-full px-5 py-3.5 text-base text-gray-900 bg-transparent outline-none rounded-t-2xl"
                   disabled={uploading || chatting}
@@ -1058,15 +1074,15 @@ function App() {
                       <>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
-                          知识库
+                          {t.optionKnowledgeBase}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={useOriginalDoc} onChange={(e) => setUseOriginalDoc(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
-                          原始文档
+                          {t.optionOriginalDoc}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={useWebSearch} onChange={(e) => setUseWebSearch(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
-                          联网搜索
+                          {t.optionWebSearch}
                         </label>
                       </>
                     )}
@@ -1074,12 +1090,12 @@ function App() {
                   <button type="submit"
                     disabled={(mode === 'chat' ? chatting : uploading) || !query.trim()}
                     className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                    {mode === 'chat' ? (chatting ? '思考中...' : '发送') : (uploading ? '保存中...' : '保存')}
+                    {mode === 'chat' ? (chatting ? t.chatThinking : t.chatSend) : (uploading ? t.actionSaving : t.actionSave)}
                   </button>
                 </div>
               </div>
             </form>
-            <div className="text-center text-xs text-gray-400 mt-2">Codex v0.3.0 · 基于本地 AI 的智能笔记系统 · by Zhichao</div>
+            <div className="text-center text-xs text-gray-400 mt-2">{t.footerText}</div>
           </div>
         </div>
       )}

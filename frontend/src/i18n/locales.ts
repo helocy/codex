@@ -9,6 +9,11 @@ export interface Translations {
   modeMemory: string;
   modeConfig: string;
 
+  // Language
+  languageSwitch: string;
+  languageChinese: string;
+  languageEnglish: string;
+
   // Chat
   chatPlaceholder: string;
   chatPlaceholderNoRag: string;
@@ -151,6 +156,10 @@ export const translations: Record<Language, Translations> = {
     modeMemory: '💾 记忆',
     modeConfig: '⚙️ 配置',
 
+    languageSwitch: '语言',
+    languageChinese: '中文',
+    languageEnglish: 'English',
+
     chatPlaceholder: '向你的知识库提问...',
     chatPlaceholderNoRag: '和大模型聊天...',
     chatSend: '发送',
@@ -277,6 +286,10 @@ export const translations: Record<Language, Translations> = {
     modeChat: '💬 Chat',
     modeMemory: '💾 Memory',
     modeConfig: '⚙️ Config',
+
+    languageSwitch: 'Language',
+    languageChinese: '中文',
+    languageEnglish: 'English',
 
     chatPlaceholder: 'Ask your knowledge base...',
     chatPlaceholderNoRag: 'Chat with AI...',

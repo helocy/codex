@@ -504,16 +504,7 @@ function App() {
 
       {/* ===== Header (only title + tabs) ===== */}
       <header className="flex flex-col items-center pt-10 pb-0 px-8 shrink-0">
-        <div className="flex items-center gap-4 mb-8">
-          <h1 className="text-5xl font-bold text-gray-900">{t.appName}</h1>
-          <button
-            onClick={() => switchLanguage(language === 'zh' ? 'en' : 'zh')}
-            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            title={language === 'zh' ? 'Switch to English' : '切换到中文'}
-          >
-            {language === 'zh' ? 'EN' : '中文'}
-          </button>
-        </div>
+        <h1 className="text-5xl font-bold text-gray-900 mb-8">{t.appName}</h1>
         <div className="flex gap-3 flex-wrap justify-center">
           {(Object.keys(modeLabels) as Mode[]).map((m) => (
             <button key={m} onClick={() => setMode(m)}
@@ -659,6 +650,18 @@ function App() {
                       <button onClick={handleSaveLLMConfig}
                         className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">{t.actionSave}</button>
                       {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-8 shadow-md">
+                    <div className="flex items-center justify-between mb-5">
+                      <h2 className="text-xl font-bold text-gray-900">{t.languageSwitch}</h2>
+                      <button
+                        onClick={() => switchLanguage(language === 'zh' ? 'en' : 'zh')}
+                        className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        {language === 'zh' ? t.languageEnglish : t.languageChinese}
+                      </button>
                     </div>
                   </div>
 

@@ -97,7 +97,7 @@ function App() {
   const getSavedConfig = (): LLMConfig => {
     const saved = localStorage.getItem('llm_config');
     if (saved) { try { return JSON.parse(saved); } catch {} }
-    return { provider: 'custom', model: 'doubao-seed-2-0-pro-260215', base_url: 'https://ark.cn-beijing.volces.com/api/v3', api_key: '' };
+    return { provider: 'custom', model: '', base_url: '', api_key: '' };
   };
 
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(getSavedConfig());
@@ -133,7 +133,13 @@ function App() {
     loadDocuments();
     const savedConfig = localStorage.getItem('llm_config');
     if (savedConfig) {
-      try { configureLLM(JSON.parse(savedConfig)).catch(console.error); } catch {}
+      try {
+        const config = JSON.parse(savedConfig);
+        // 只有当配置了 API Key 时才自动配置
+        if (config.api_key && config.api_key.trim()) {
+          configureLLM(config).catch(console.error);
+        }
+      } catch {}
     }
   }, []);
 
@@ -636,7 +642,6 @@ function App() {
                       ))}
                       <button onClick={handleSaveLLMConfig}
                         className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">保存配置</button>
-                      {llmConfigured && <div className="text-sm text-green-600 text-center">✓ LLM 已配置</div>}
                       {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
                     </div>
                   </div>
@@ -1074,7 +1079,7 @@ function App() {
                 </div>
               </div>
             </form>
-            <div className="text-center text-xs text-gray-400 mt-2">Codex v0.2.3 · 基于本地 AI 的智能笔记系统 · by Zhichao</div>
+            <div className="text-center text-xs text-gray-400 mt-2">Codex v0.3.0 · 基于本地 AI 的智能笔记系统 · by Zhichao</div>
           </div>
         </div>
       )}

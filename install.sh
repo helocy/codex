@@ -7,6 +7,7 @@
 set -e
 
 REPO_URL="https://github.com/helocy/codex.git"
+REPO_URL_SSH="git@github.com:helocy/codex.git"
 INSTALL_DIR="${HOME}/codex"
 
 BOLD='\033[1m'
@@ -58,7 +59,11 @@ if [[ -d "${INSTALL_DIR}/.git" ]]; then
     git pull --ff-only origin main 2>/dev/null || git pull origin main
 else
     echo -e "${BLUE}[INFO]${NC}  克隆 Codex 仓库到 ${INSTALL_DIR} ..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
+    # 尝试 HTTPS，如果失败则尝试 SSH
+    if ! git clone "$REPO_URL" "$INSTALL_DIR" 2>/dev/null; then
+        echo -e "${YELLOW}[WARN]${NC}  HTTPS 克隆失败，尝试使用 SSH..."
+        git clone "$REPO_URL_SSH" "$INSTALL_DIR"
+    fi
     cd "$INSTALL_DIR"
 fi
 

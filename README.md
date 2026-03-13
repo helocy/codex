@@ -189,6 +189,10 @@ Model: llama3
 
 ## 📝 版本历史
 
+### v0.3.0 (2026-03-12)
+
+- 版本号统一更新至 0.3.0
+
 ### v0.2.3 (2026-03-12)
 
 - Ubuntu/Debian 完整支持：通过 PGDG 官方源安装 PostgreSQL 15 + pgvector，Node.js 升至 20 LTS

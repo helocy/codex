@@ -140,29 +140,28 @@ async def rag_chat(
                 if not title:
                     continue
 
-                # 查找原始文档
-                original_content = original_doc_service.find_original_doc(title)
+                # 先从 chunks 中提取页码，再传给 find_original_doc
+                doc_chunks = [chunk.content for chunk, _ in results if chunk.document_id == doc_id]
+                page_numbers = set()
+                for chunk_content in doc_chunks:
+                    pages = re.findall(r'\[第\s*(\d+)\s*页\]', chunk_content)
+                    page_numbers.update([int(p) for p in pages])
+
+                # 扩展页码范围（前后各加1页），无页码时传 None（读全文）
+                if page_numbers:
+                    expanded_pages = set()
+                    for page in page_numbers:
+                        expanded_pages.add(max(1, page - 1))
+                        expanded_pages.add(page)
+                        expanded_pages.add(page + 1)
+                    page_info = f"（涉及页码：{', '.join(map(str, sorted(expanded_pages)))}）"
+                else:
+                    expanded_pages = None
+                    page_info = ""
+
+                # 查找原始文档，PDF 只解析目标页
+                original_content = original_doc_service.find_original_doc(title, target_pages=expanded_pages)
                 if original_content:
-                    # 提取该文档相关的 chunks 中提到的页码
-                    doc_chunks = [chunk.content for chunk, _ in results if chunk.document_id == doc_id]
-                    page_numbers = set()
-                    for chunk_content in doc_chunks:
-                        # 匹配 [第 X 页] 格式
-                        pages = re.findall(r'\[第\s*(\d+)\s*页\]', chunk_content)
-                        page_numbers.update([int(p) for p in pages])
-
-                    if page_numbers:
-                        # 扩展页码范围（前后各加1页）
-                        expanded_pages = set()
-                        for page in page_numbers:
-                            expanded_pages.add(max(1, page - 1))
-                            expanded_pages.add(page)
-                            expanded_pages.add(page + 1)
-
-                        page_info = f"（涉及页码：{', '.join(map(str, sorted(expanded_pages)))}）"
-                    else:
-                        page_info = ""
-
                     # 限制原始文档长度，避免超出 token 限制
                     max_length = 8000
                     if len(original_content) > max_length:
@@ -172,7 +171,7 @@ async def rag_chat(
                     original_doc_info.append({
                         "title": title,
                         "found": True,
-                        "pages": sorted(expanded_pages) if page_numbers else None
+                        "pages": sorted(expanded_pages) if expanded_pages else None
                     })
                 else:
                     # 未找到原始文档

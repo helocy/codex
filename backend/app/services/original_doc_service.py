@@ -67,12 +67,14 @@ class OriginalDocService:
         self._save_config()
         return {'success': True, 'message': '路径移除成功'}
 
-    def find_original_doc(self, title: str) -> Optional[str]:
+    def find_original_doc(self, title: str, target_pages: Optional[set] = None) -> Optional[str]:
         """
         根据文档标题在配置的路径中查找原始文档内容
 
         Args:
             title: 文档标题
+            target_pages: 目标页码集合（1-indexed），仅对 PDF 生效。
+                          为 None 时读取全部内容。
 
         Returns:
             原始文档内容，如果找不到返回 None
@@ -101,7 +103,7 @@ class OriginalDocService:
                         if os.path.exists(file_path):
                             try:
                                 ext = os.path.splitext(base_name)[1]
-                                content = self._read_file(file_path, ext)
+                                content = self._read_file(file_path, ext, target_pages)
                                 if content:
                                     return content
                             except Exception:
@@ -113,7 +115,7 @@ class OriginalDocService:
                             file_path = os.path.join(root, filename)
                             if os.path.exists(file_path):
                                 try:
-                                    content = self._read_file(file_path, ext)
+                                    content = self._read_file(file_path, ext, target_pages)
                                     if content:
                                         return content
                                 except Exception:
@@ -121,22 +123,53 @@ class OriginalDocService:
 
         return None
 
-    def _read_file(self, file_path: str, ext: str) -> Optional[str]:
+    def _read_file(self, file_path: str, ext: str, target_pages: Optional[set] = None) -> Optional[str]:
         """根据文件扩展名读取文件内容"""
         if ext in ['.md', '.txt', '.markdown']:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return f.read()
-        
+
         elif ext == '.pdf' and PDF_AVAILABLE:
             try:
                 reader = PdfReader(file_path)
-                text_parts = []
-                for page in reader.pages:
-                    text_parts.append(page.extract_text())
-                return '\n\n'.join(text_parts)
+                total_pages = len(reader.pages)
+
+                if target_pages:
+                    # 只解析目标页码（1-indexed → 0-indexed）
+                    indices = sorted(p - 1 for p in target_pages if 1 <= p <= total_pages)
+                    text_parts = []
+                    for i in indices:
+                        text = reader.pages[i].extract_text() or ""
+                        if text.strip():
+                            text_parts.append(f"[第 {i + 1} 页]\n{text}")
+                    content = '\n\n'.join(text_parts)
+
+                    # 内容过少（< 200字符）时，自动扩展 ±3 页重试
+                    if len(content.strip()) < 200:
+                        expanded = set()
+                        for p in target_pages:
+                            for offset in range(-3, 4):
+                                np_ = p + offset
+                                if 1 <= np_ <= total_pages:
+                                    expanded.add(np_)
+                        indices = sorted(p - 1 for p in expanded)
+                        text_parts = []
+                        for i in indices:
+                            text = reader.pages[i].extract_text() or ""
+                            if text.strip():
+                                text_parts.append(f"[第 {i + 1} 页]\n{text}")
+                        content = '\n\n'.join(text_parts)
+
+                    return content if content.strip() else None
+                else:
+                    # 无页码信息时读取全部
+                    text_parts = []
+                    for page in reader.pages:
+                        text_parts.append(page.extract_text())
+                    return '\n\n'.join(text_parts)
             except Exception:
                 return None
-        
+
         elif ext == '.docx' and DOCX_AVAILABLE:
             try:
                 doc = Document(file_path)
@@ -147,7 +180,7 @@ class OriginalDocService:
                 return '\n\n'.join(text_parts)
             except Exception:
                 return None
-        
+
         return None
 
 

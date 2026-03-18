@@ -145,6 +145,16 @@ export const configureEmbedding = async (config: {
   return response.data;
 };
 
+export const buildDocumentTreeIndex = async (id: number) => {
+  const response = await api.post(`/documents/documents/${id}/build-tree-index`);
+  return response.data;
+};
+
+export const batchBuildTreeIndex = async () => {
+  const response = await api.post('/documents/batch-build-tree-index');
+  return response.data;
+};
+
 export const getOriginalDocPaths = async () => {
   const response = await api.get('/admin/original-doc-paths');
   return response.data;

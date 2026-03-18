@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath } from './services/api';
+import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex } from './services/api';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import { useTranslation } from './i18n/useTranslation';
 import './index.css';
@@ -121,6 +121,7 @@ function App() {
   const [docSearch, setDocSearch] = useState('');
   const [confirm, setConfirm] = useState<ConfirmDialog>({ visible: false, title: '', message: '', onConfirm: () => {} });
   const [exporting, setExporting] = useState(false);
+  const [batchBuilding, setBatchBuilding] = useState(false);
 
   // 自动滚到底部
   useEffect(() => {
@@ -222,6 +223,25 @@ function App() {
         await loadDocuments(); await loadDbStats();
       } catch (e: any) { setAdminMessage(`${t.msgError} ${language === 'zh' ? '删除失败' : 'Delete failed'}：${e.response?.data?.detail || e.message}`); }
     });
+  };
+
+  const handleBatchBuildTreeIndex = async () => {
+    setBatchBuilding(true);
+    setAdminMessage('');
+    try {
+      const result = await batchBuildTreeIndex();
+      if (result.triggered_count === 0) {
+        setAdminMessage(`✓ ${language === 'zh' ? '所有文档均已有树形索引，无需重建' : 'All documents already have tree index'}`);
+      } else {
+        setAdminMessage(`✓ ${language === 'zh' ? `已触发 ${result.triggered_count} 篇文档的树形索引构建，后台处理中...` : `Triggered tree index build for ${result.triggered_count} documents, processing in background...`}`);
+      }
+      // 延迟刷新列表，让后台有时间处理部分文档
+      setTimeout(() => loadDocuments(), 3000);
+    } catch (e: any) {
+      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setBatchBuilding(false);
+    }
   };
 
   const handleReset = () => {
@@ -863,6 +883,17 @@ function App() {
                   {docSearch && (
                     <button onClick={() => setDocSearch('')} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">{t.actionClear}</button>
                   )}
+                  {isLocalhost && documents.length > 0 && (
+                    <button
+                      onClick={handleBatchBuildTreeIndex}
+                      disabled={batchBuilding}
+                      className="shrink-0 px-3 py-1.5 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {batchBuilding
+                        ? (language === 'zh' ? '构建中...' : 'Building...')
+                        : (language === 'zh' ? '🌳 批量构建树形索引' : '🌳 Build Tree Index')}
+                    </button>
+                  )}
                 </div>
                 {documents.length === 0 ? (
                   <div className="text-center text-gray-400 py-12">{language === 'zh' ? '暂无文档' : 'No documents'}</div>
@@ -891,6 +922,10 @@ function App() {
                                 {doc.file_type === 'markdown' ? 'MD' :
                                  doc.file_type === 'pdf' ? 'PDF' :
                                  doc.file_type === 'word' ? 'DOC' : 'TXT'}
+                              </span>
+                              <span title={doc.has_tree_index ? (language === 'zh' ? '已有树形索引' : 'Has tree index') : (language === 'zh' ? '无树形索引' : 'No tree index')}
+                                className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${doc.has_tree_index ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-50 text-gray-300'}`}>
+                                🌳
                               </span>
                               <div className="min-w-0">
                                 <p className="text-gray-800 text-sm truncate">

@@ -20,6 +20,7 @@ class ChatRequest(BaseModel):
     use_rag: bool = True
     use_web_search: bool = False  # 是否使用网络搜索
     use_original_doc: bool = True  # 是否使用原始文档
+    use_tree_index: bool = True    # 是否启用 PageIndex 两阶段检索
     history: Optional[List[Dict[str, str]]] = None  # 对话历史
 
 
@@ -78,16 +79,19 @@ async def rag_chat(
         comparison_keywords = ['对比', '比较', 'vs', 'versus', '区别', '差异']
         is_comparison = any(kw in request.query.lower() for kw in comparison_keywords)
 
-        # 如果是对比查询，尝试提取实体名称进行多查询检索
-        if is_comparison:
-            # 改进的实体提取：匹配芯片型号模式（如 RV1126B, SSC388G, RK3588 等）
-            # 模式：大写字母开头，后跟字母、数字的组合，至少包含一个数字
+        # PageIndex 两阶段检索（有树形索引时优先使用）
+        tree_referenced_nodes = []
+        if request.use_tree_index and not is_comparison:
+            results, tree_referenced_nodes = await SearchService.search_with_tree_index(
+                db, request.query, llm_service,
+                top_k=request.top_k,
+                use_tree=True
+            )
+        elif is_comparison:
             entities = re.findall(r'[A-Z]{2,}[0-9]+[A-Z0-9]*', request.query)
             if len(entities) >= 2:
-                # 对每个实体单独检索，然后合并
                 results = SearchService.search_multi_query(db, entities, top_k=request.top_k)
             else:
-                # 使用更大的 top_k 确保覆盖多个实体
                 results = SearchService.search(db, request.query, top_k=request.top_k * 2)
         else:
             results = SearchService.search(db, request.query, top_k=request.top_k)
@@ -237,12 +241,19 @@ async def rag_chat(
                 "document_id": chunk.document_id,
                 "content": chunk.content,
                 "similarity": _safe_score(similarity),
+                "section_id": getattr(chunk, 'section_id', None),
                 "content_source": getattr(chunk, '_content_source', '知识库')
             }
             for chunk, similarity in results
         ]
 
-        return {"answer": answer, "sources": sources, "web_sources": web_results, "original_doc_status": original_doc_status}
+        return {
+            "answer": answer,
+            "sources": sources,
+            "web_sources": web_results,
+            "original_doc_status": original_doc_status,
+            "tree_nodes": tree_referenced_nodes,  # PageIndex 命中的章节节点
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

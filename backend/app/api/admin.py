@@ -135,6 +135,8 @@ async def export_database(db: Session = Depends(get_db)):
                 "title": doc.title,
                 "file_type": doc.file_type.value if hasattr(doc.file_type, 'value') else str(doc.file_type),
                 "content": doc.content,
+                "file_size": doc.file_size,
+                "tree_index": doc.tree_index,
                 "created_at": doc.created_at.isoformat(),
                 "chunks": []
             }
@@ -158,6 +160,7 @@ async def export_database(db: Session = Depends(get_db)):
                 doc_data["chunks"].append({
                     "content": chunk.content,
                     "chunk_index": chunk.chunk_index,
+                    "section_id": chunk.section_id,
                     "embedding": embedding_list
                 })
 
@@ -224,6 +227,8 @@ async def import_database(file: UploadFile = File(...), db: Session = Depends(ge
                 title=doc_data["title"],
                 file_type=doc_data["file_type"],
                 content=doc_data.get("content", ""),
+                file_size=doc_data.get("file_size"),
+                tree_index=doc_data.get("tree_index"),
                 file_path=None  # 导入的文档没有原始文件
             )
             db.add(document)
@@ -240,6 +245,7 @@ async def import_database(file: UploadFile = File(...), db: Session = Depends(ge
                     document_id=document.id,
                     content=chunk_data["content"],
                     chunk_index=chunk_data["chunk_index"],
+                    section_id=chunk_data.get("section_id"),
                     embedding=embedding
                 )
                 db.add(chunk)

@@ -136,7 +136,7 @@ class EmbeddingService:
         return results
 
     # ── 云端 OpenAI 兼容接口 ─────────────────────────────────────────────────
-    def _encode_openai(self, texts: List[str]) -> List[np.ndarray]:
+    def _encode_openai(self, texts: List[str], batch_size: int = 10) -> List[np.ndarray]:
         if self._openai_client is None:
             from openai import OpenAI
             if not self.api_key:
@@ -146,13 +146,16 @@ class EmbeddingService:
                 kwargs["base_url"] = self.base_url
             self._openai_client = OpenAI(**kwargs)
 
-        response = self._openai_client.embeddings.create(
-            model=self.model_name,
-            input=texts,
-        )
-        # 按输入顺序排列
-        ordered = sorted(response.data, key=lambda x: x.index)
-        return [np.array(item.embedding, dtype=np.float32) for item in ordered]
+        results: List[np.ndarray] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            response = self._openai_client.embeddings.create(
+                model=self.model_name,
+                input=batch,
+            )
+            ordered = sorted(response.data, key=lambda x: x.index)
+            results.extend(np.array(item.embedding, dtype=np.float32) for item in ordered)
+        return results
 
 
 # 全局实例

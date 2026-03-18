@@ -193,6 +193,14 @@ Model: llama3
 
 ## 📝 版本历史
 
+### v0.4.1 (2026-03-18)
+
+- 部署向导升级：`deploy.sh` 改为交互式分步引导，支持选择大模型提供商（豆包/通义千问/OpenAI/Ollama/自定义），按提供商展示对应参数，API Key 隐藏输入，配置摘要确认后写入 `.env`
+- 新增通用 LLM 环境变量支持（`LLM_PROVIDER/LLM_API_KEY/LLM_BASE_URL/LLM_MODEL`），兼容旧版 `DOUBAO_API_KEY`，所有提供商均可通过 `.env` 持久化
+- 文档列表新增树形索引状态标记（🌳 绿色=已有索引，灰色=未建立），支持批量构建缺失的树形索引
+- 修复 Ubuntu 系统被识别显示为 debian 的问题
+- 新增英文 README（README_EN.md），中英文双语切换
+
 ### v0.4.0 (2026-03-18)
 
 - 新增 PageIndex 树形索引：文档上传后自动生成层次化目录树（JSONB 存储），Markdown 直接解析标题，PDF/文本调用 LLM 提取章节结构

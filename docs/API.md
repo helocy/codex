@@ -25,7 +25,7 @@ GET /api/v1/api/health
 **响应示例**
 
 ```json
-{"status": "ok", "service": "Codex API", "version": "0.3.0"}
+{"status": "ok", "service": "Codex API", "version": "0.4.1"}
 ```
 
 ---

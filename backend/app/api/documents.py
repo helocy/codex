@@ -503,10 +503,28 @@ async def list_documents(db: Session = Depends(get_db)):
                 "title": doc.title,
                 "file_type": doc.file_type,
                 "file_size": doc.file_size,
-                "created_at": doc.created_at.isoformat()
+                "created_at": doc.created_at.isoformat(),
+                "has_tree_index": doc.tree_index is not None,
             }
             for doc in documents
         ]
+    }
+
+
+@router.post("/batch-build-tree-index")
+async def batch_build_tree_index(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """为所有没有树形索引的文档批量触发 PageIndex 构建（后台异步执行）"""
+    docs_without_index = db.query(Document).filter(Document.tree_index == None).all()
+    count = len(docs_without_index)
+    for doc in docs_without_index:
+        background_tasks.add_task(_build_tree_index_background, doc.id)
+    return {
+        "message": f"已触发 {count} 篇文档的树形索引构建",
+        "triggered_count": count,
+        "document_ids": [doc.id for doc in docs_without_index],
     }
 
 

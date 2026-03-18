@@ -32,7 +32,11 @@ echo ""
 if [[ "$OSTYPE" == "darwin"* ]]; then
     OS_NAME="macOS"
 elif [[ -f /etc/debian_version ]]; then
-    OS_NAME="Ubuntu/Debian"
+    if [[ -f /etc/os-release ]]; then
+        OS_NAME=$(. /etc/os-release && echo "${NAME:-Ubuntu/Debian}")
+    else
+        OS_NAME="Ubuntu/Debian"
+    fi
 else
     echo -e "${YELLOW}警告: 未识别的操作系统，尝试继续...${NC}"
     OS_NAME="Unknown"

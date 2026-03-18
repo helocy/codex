@@ -28,14 +28,22 @@ step()    { echo -e "\n${BOLD}━━━ $1 ━━━${NC}"; }
 detect_os() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
         OS="macos"
+        OS_DISPLAY="macOS"
     elif [[ -f /etc/debian_version ]]; then
         OS="debian"
+        # 从 /etc/os-release 读取发行版名称（Ubuntu / Debian 等）
+        if [[ -f /etc/os-release ]]; then
+            OS_DISPLAY=$(. /etc/os-release && echo "${NAME:-Ubuntu/Debian}")
+        else
+            OS_DISPLAY="Ubuntu/Debian"
+        fi
     elif [[ -f /etc/redhat-release ]]; then
         OS="redhat"
+        OS_DISPLAY=$(cat /etc/redhat-release | cut -d' ' -f1-2)
     else
         error "不支持的操作系统，目前支持 macOS / Ubuntu / Debian"
     fi
-    info "检测到操作系统: $OS"
+    info "检测到操作系统: $OS_DISPLAY"
 }
 
 # ── macOS: 检查 Homebrew ────────────────────────────────────────────────────────

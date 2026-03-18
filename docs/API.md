@@ -99,6 +99,7 @@ POST /api/v1/api/chat
 | use_rag | bool | 否 | true | 是否使用知识库 |
 | use_web_search | bool | 否 | false | 是否联网搜索 |
 | use_original_doc | bool | 否 | true | 是否查找原始文档 |
+| use_tree_index | bool | 否 | true | 是否启用 PageIndex 两阶段检索（LLM 先定位章节再检索）|
 | top_k | int | 否 | 5 | 检索 chunk 数量 |
 
 **请求示例**
@@ -119,10 +120,21 @@ curl -X POST http://localhost:8001/api/v1/api/chat \
     {
       "content": "RK3588 接口规格...",
       "document_id": 42,
-      "similarity": 0.85
+      "similarity": 0.85,
+      "section_id": "0012"
     }
   ],
-  "web_sources": []
+  "web_sources": [],
+  "tree_nodes": [
+    {
+      "doc_id": 42,
+      "doc_title": "Rockchip RK3588 Datasheet",
+      "node_id": "0012",
+      "node_title": "接口规格",
+      "summary": "介绍 RK3588 各类接口的规格参数",
+      "reason": "该节点包含 USB/PCIe/HDMI 接口规格"
+    }
+  ]
 }
 ```
 

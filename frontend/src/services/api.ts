@@ -60,7 +60,8 @@ export const chatWithRAG = async (
   useRag: boolean = true,
   useWebSearch: boolean = false,
   useOriginalDoc: boolean = true,
-  history?: Array<{ role: string; content: string }>
+  history?: Array<{ role: string; content: string }>,
+  useTreeIndex: boolean = true,
 ) => {
   const response = await api.post('/chat/chat', {
     query,
@@ -68,6 +69,7 @@ export const chatWithRAG = async (
     use_rag: useRag,
     use_web_search: useWebSearch,
     use_original_doc: useOriginalDoc,
+    use_tree_index: useTreeIndex,
     history: history || [],
   });
   return response.data;

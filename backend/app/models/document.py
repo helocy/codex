@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Enum, Float
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from datetime import datetime
 from app.core.database import Base
 import enum
@@ -24,6 +24,8 @@ class Document(Base):
     file_type = Column(Enum(FileType), nullable=False)
     file_path = Column(String(512))
     file_size = Column(Integer)
+    # PageIndex 树形索引：层级目录结构，格式见 page_index_service.py
+    tree_index = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -36,4 +38,6 @@ class Chunk(Base):
     content = Column(Text, nullable=False)
     embedding = Column(ARRAY(Float))
     chunk_index = Column(Integer)
+    # 所属树形节点 ID（对应 tree_index 中的 node_id）
+    section_id = Column(String(32), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)

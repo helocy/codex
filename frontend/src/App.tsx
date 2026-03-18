@@ -12,6 +12,7 @@ interface ChatMessage {
   sources?: any[];
   webSources?: any[];
   originalDocStatus?: string;
+  treeNodes?: any[];
 }
 
 interface LLMConfig {
@@ -315,7 +316,8 @@ function App() {
         content: r.answer,
         sources: r.sources,
         webSources: r.web_sources,
-        originalDocStatus: r.original_doc_status
+        originalDocStatus: r.original_doc_status,
+        treeNodes: r.tree_nodes,
       }]);
     } catch (e: any) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: `抱歉，对话失败: ${e.response?.data?.detail || e.message}` }]);
@@ -551,8 +553,18 @@ function App() {
                   )}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-gray-700">
+                      {msg.treeNodes && msg.treeNodes.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs text-gray-400 mb-1">📑 {language === 'zh' ? '命中章节' : 'Matched sections'}</p>
+                          {Array.from(new Map(msg.treeNodes.map((n: any) => [`${n.doc_id}-${n.node_id}`, n])).values()).map((n: any, i: number) => (
+                            <div key={i} className="text-xs text-gray-400 mb-0.5 pl-2">
+                              · {n.doc_title} › {n.node_title}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <p className="text-xs text-gray-400 mb-2">{t.sourceKnowledgeBase}</p>
-                      {msg.sources.map((s, i) => (
+                      {Array.from(new Map(msg.sources.map((s: any) => [s.document_id, s])).values()).map((s: any, i: number) => (
                         <div key={i} className="text-xs text-gray-300 mb-1">
                           • 文档 #{s.document_id} ({(s.similarity * 100).toFixed(0)}% 匹配)
                         </div>

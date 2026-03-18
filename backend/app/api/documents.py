@@ -1,11 +1,13 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.core.config import settings
 from app.models.document import Document, FileType, Chunk
 from app.services.file_processor import FileProcessor
 from app.services.embedding_service import embedding_service
+from app.services.page_index_service import page_index_service
+from app.services.llm_service import llm_service
 from pydantic import BaseModel
 import os
 import shutil
@@ -27,6 +29,7 @@ async def save_text(
     skip_duplicate: bool = False,  # 是否跳过相似文档检测（强制上传）
     overwrite: bool = False,       # 是否覆盖同名文档
     check_similar: bool = True,    # 是否检查相似文档
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
     """保存纯文本内容
@@ -100,11 +103,16 @@ async def save_text(
 
         db.commit()
 
+        # 后台异步生成树形索引
+        if background_tasks is not None:
+            background_tasks.add_task(_build_tree_index_background, document.id)
+
         return {
             "message": "文本保存成功",
             "document_id": document.id,
             "title": document.title,
-            "chunks_count": len(chunks)
+            "chunks_count": len(chunks),
+            "tree_index_status": "pending"
         }
 
     except Exception as e:
@@ -148,12 +156,27 @@ def find_similar_documents(db: Session, content: str, title: str, threshold: flo
     return similar_docs[:limit]
 
 
+async def _build_tree_index_background(document_id: int):
+    """后台任务：为文档生成树形索引（不阻塞上传响应）"""
+    db = SessionLocal()
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document and llm_service.client:
+            await page_index_service.build(document, db, llm_service)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"后台树形索引生成失败: {e}")
+    finally:
+        db.close()
+
+
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     skip_duplicate: bool = False,  # 是否跳过相似文档检测（强制上传）
     overwrite: bool = False,       # 是否覆盖同名文档
     check_similar: bool = True,    # 是否检查相似文档
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
     """上传文件并处理"""
@@ -264,11 +287,16 @@ async def upload_file(
 
         db.commit()
 
+        # 后台异步生成树形索引（不阻塞响应）
+        if background_tasks is not None:
+            background_tasks.add_task(_build_tree_index_background, document.id)
+
         return {
             "message": "文件上传成功",
             "document_id": document.id,
             "title": document.title,
-            "chunks_count": len(chunks)
+            "chunks_count": len(chunks),
+            "tree_index_status": "pending"
         }
 
     except Exception as e:
@@ -479,6 +507,34 @@ async def list_documents(db: Session = Depends(get_db)):
             }
             for doc in documents
         ]
+    }
+
+
+@router.post("/documents/{document_id}/build-tree-index")
+async def build_document_tree_index(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """手动触发为指定文档重建 PageIndex 树形索引"""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    background_tasks.add_task(_build_tree_index_background, document_id)
+    return {"message": f"已触发文档「{document.title}」的树形索引重建", "document_id": document_id}
+
+
+@router.get("/documents/{document_id}/tree-index")
+async def get_document_tree_index(document_id: int, db: Session = Depends(get_db)):
+    """获取文档的 PageIndex 树形索引"""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {
+        "document_id": document_id,
+        "title": document.title,
+        "has_tree_index": document.tree_index is not None,
+        "tree_index": document.tree_index,
     }
 
 

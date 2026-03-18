@@ -96,6 +96,7 @@ function App() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const dirInputRef = useRef<HTMLInputElement>(null);
 
   const getSavedConfig = (): LLMConfig => {
     const saved = localStorage.getItem('llm_config');
@@ -1035,8 +1036,11 @@ function App() {
                     {t.memoryUploadBatch}
                     <span className="ml-2 text-xs font-normal text-gray-400">{t.memoryUploadBatchDesc}</span>
                   </label>
-                  <input type="file" {...{ webkitdirectory: "true", directory: "true" } as any} onChange={handleDirectoryUpload} disabled={uploading}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 disabled:opacity-50" />
+                  <input ref={dirInputRef} type="file" {...{ webkitdirectory: "true", directory: "true" } as any} onChange={handleDirectoryUpload} disabled={uploading} className="hidden" />
+                  <button type="button" onClick={() => dirInputRef.current?.click()} disabled={uploading}
+                    className="px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors">
+                    {language === 'zh' ? '选择路径' : 'Select Path'}
+                  </button>
                 </div>
               </div>
 

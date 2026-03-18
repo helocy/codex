@@ -27,7 +27,13 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"
     EMBEDDING_DIM: int = 384
 
-    # LLM 配置
+    # LLM 配置（通用，优先级高于下方 Doubao 字段）
+    LLM_PROVIDER: Optional[str] = None   # doubao | qwen | openai | ollama | custom
+    LLM_API_KEY: Optional[str] = None
+    LLM_BASE_URL: Optional[str] = None
+    LLM_MODEL: Optional[str] = None
+
+    # 兼容旧版 Doubao 专用字段
     DOUBAO_API_KEY: Optional[str] = None
     DOUBAO_MODEL: str = "doubao-seed-1-6-251015"
 

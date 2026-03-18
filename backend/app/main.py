@@ -8,12 +8,19 @@ from app.services.llm_service import llm_service
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
 
-# 自动配置豆包 LLM（如果环境变量中有 API Key）
-if settings.DOUBAO_API_KEY:
+# 自动配置 LLM（优先读取通用 LLM_* 变量，兼容旧版 DOUBAO_* 变量）
+if settings.LLM_PROVIDER and settings.LLM_API_KEY:
+    llm_service.configure(
+        provider=settings.LLM_PROVIDER,
+        api_key=settings.LLM_API_KEY,
+        base_url=settings.LLM_BASE_URL or None,
+        model=settings.LLM_MODEL or None,
+    )
+elif settings.DOUBAO_API_KEY:
     llm_service.configure(
         provider="doubao",
         api_key=settings.DOUBAO_API_KEY,
-        model=settings.DOUBAO_MODEL
+        model=settings.DOUBAO_MODEL,
     )
 
 app = FastAPI(

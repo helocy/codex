@@ -193,6 +193,14 @@ Add local folder paths in the "Config" page. The system will search these paths 
 
 ## 📝 Changelog
 
+### v0.4.1 (2026-03-18)
+
+- Upgraded deploy wizard: `deploy.sh` now features step-by-step interactive setup, supporting provider selection (Doubao/Qwen/OpenAI/Ollama/Custom), provider-specific prompts, hidden API key input, and a summary confirmation before writing `.env`
+- Added generic LLM environment variable support (`LLM_PROVIDER/LLM_API_KEY/LLM_BASE_URL/LLM_MODEL`), backward-compatible with `DOUBAO_API_KEY`
+- Document list now shows tree index status (🌳 green = indexed, gray = not built) with a batch build button for missing indexes
+- Fixed Ubuntu OS being displayed as "debian" in deploy output
+- Added English README (`README_EN.md`) with language toggle
+
 ### v0.4.0 (2026-03-18)
 
 - Added PageIndex tree index: documents automatically generate hierarchical chapter trees on upload (JSONB storage); Markdown parses headings directly, PDF/text uses LLM for structure extraction

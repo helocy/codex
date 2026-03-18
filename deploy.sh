@@ -260,56 +260,215 @@ setup_backend() {
     deactivate
 }
 
-# ── 配置环境变量 ────────────────────────────────────────────────────────────────
+# ── 辅助：带默认值的 read ────────────────────────────────────────────────────────
+ask() {
+    # ask <var_name> <prompt> [default]
+    local _var="$1" _prompt="$2" _default="$3" _input
+    if [[ -n "$_default" ]]; then
+        read -p "  $_prompt [${_default}]: " _input
+        printf -v "$_var" '%s' "${_input:-$_default}"
+    else
+        read -p "  $_prompt: " _input
+        printf -v "$_var" '%s' "$_input"
+    fi
+}
+
+ask_secret() {
+    # ask_secret <var_name> <prompt>
+    local _var="$1" _prompt="$2" _input
+    read -s -p "  $_prompt: " _input
+    echo ""
+    printf -v "$_var" '%s' "$_input"
+}
+
+# ── 配置环境变量（交互式向导）────────────────────────────────────────────────────
 setup_env() {
-    step "配置环境变量"
+    step "配置大模型"
 
     ENV_FILE="$BACKEND_DIR/.env"
 
     if [[ -f "$ENV_FILE" ]]; then
-        info ".env 文件已存在，跳过创建（如需修改请直接编辑 backend/.env）"
-        return
+        echo ""
+        echo -e "  ${YELLOW}检测到已有配置文件 backend/.env${NC}"
+        read -p "  是否重新配置？(y/N): " _reconfig
+        if [[ "$_reconfig" != "y" && "$_reconfig" != "Y" ]]; then
+            info "保留现有配置，跳过配置向导"
+            return
+        fi
+        cp "$ENV_FILE" "${ENV_FILE}.bak"
+        info "已备份旧配置到 backend/.env.bak"
     fi
 
-    echo ""
-    echo -e "${YELLOW}请配置大模型 API（直接回车可跳过，稍后在界面中配置）${NC}"
-    echo ""
-    echo "支持的大模型服务："
-    echo "  1. 豆包 (Doubao) - https://console.volcengine.com/ark"
-    echo "  2. 通义千问 (Qwen) - https://dashscope.aliyuncs.com"
-    echo "  3. OpenAI - https://platform.openai.com"
-    echo "  4. Ollama 本地模型"
-    echo "  5. 其他 OpenAI 兼容 API"
-    echo ""
-    read -p "豆包 API Key（选填，可跳过）: " DOUBAO_KEY
-    read -p "豆包模型名称 [doubao-seed-1-6-251015]: " DOUBAO_MODEL_INPUT
-    DOUBAO_MODEL="${DOUBAO_MODEL_INPUT:-doubao-seed-1-6-251015}"
+    # ── 公共变量 ──────────────────────────────────────────────────────────────
+    LLM_PROVIDER=""
+    LLM_API_KEY=""
+    LLM_BASE_URL=""
+    LLM_MODEL=""
+    LLM_PROVIDER_LABEL=""
 
+    echo ""
+    echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BOLD}  │  第一步：选择大模型提供商                           │${NC}"
+    echo -e "${BOLD}  └─────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "  ${BLUE}1)${NC} 豆包 (Doubao)       — 火山引擎，支持 doubao-seed 系列"
+    echo -e "  ${BLUE}2)${NC} 通义千问 (Qwen)     — 阿里云，支持 qwen-plus / qwen-turbo"
+    echo -e "  ${BLUE}3)${NC} OpenAI              — GPT-4o、GPT-4-turbo 等"
+    echo -e "  ${BLUE}4)${NC} Ollama（本地）       — 无需 API Key，需先安装 Ollama"
+    echo -e "  ${BLUE}5)${NC} 其他兼容接口         — 任何 OpenAI 兼容的 API"
+    echo -e "  ${BLUE}0)${NC} 跳过，稍后在网页界面配置"
+    echo ""
+    read -p "  请输入选项 [0-5]: " _choice
+
+    case "$_choice" in
+      1)
+        LLM_PROVIDER="doubao"
+        LLM_PROVIDER_LABEL="豆包 (Doubao)"
+        echo ""
+        echo -e "  ${YELLOW}→ 获取 API Key: https://console.volcengine.com/ark${NC}"
+        echo ""
+        ask_secret LLM_API_KEY "API Key"
+        ask LLM_MODEL "模型名称" "doubao-seed-1-6-251015"
+        LLM_BASE_URL="https://ark.cn-beijing.volces.com/api/v3"
+        ;;
+      2)
+        LLM_PROVIDER="qwen"
+        LLM_PROVIDER_LABEL="通义千问 (Qwen)"
+        echo ""
+        echo -e "  ${YELLOW}→ 获取 API Key: https://dashscope.console.aliyun.com${NC}"
+        echo ""
+        ask_secret LLM_API_KEY "API Key"
+        ask LLM_MODEL "模型名称" "qwen-plus"
+        LLM_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        ;;
+      3)
+        LLM_PROVIDER="openai"
+        LLM_PROVIDER_LABEL="OpenAI"
+        echo ""
+        echo -e "  ${YELLOW}→ 获取 API Key: https://platform.openai.com/api-keys${NC}"
+        echo ""
+        ask_secret LLM_API_KEY "API Key"
+        ask LLM_MODEL "模型名称" "gpt-4o"
+        ask LLM_BASE_URL "Base URL（使用代理可修改）" "https://api.openai.com/v1"
+        ;;
+      4)
+        LLM_PROVIDER="ollama"
+        LLM_PROVIDER_LABEL="Ollama（本地）"
+        echo ""
+        echo -e "  ${YELLOW}→ 请确保已安装并启动 Ollama: https://ollama.com${NC}"
+        echo ""
+        ask LLM_MODEL "模型名称" "llama3"
+        ask LLM_BASE_URL "Ollama 地址" "http://localhost:11434/v1"
+        LLM_API_KEY="ollama"
+        ;;
+      5)
+        LLM_PROVIDER="custom"
+        LLM_PROVIDER_LABEL="自定义兼容接口"
+        echo ""
+        ask LLM_BASE_URL "Base URL（如 https://api.example.com/v1）" ""
+        ask_secret LLM_API_KEY "API Key"
+        ask LLM_MODEL "模型名称" ""
+        ;;
+      *)
+        LLM_PROVIDER_LABEL="（跳过，稍后配置）"
+        info "已跳过大模型配置，启动后请在「配置」页面设置"
+        ;;
+    esac
+
+    # ── 第二步：Embedding 模型 ────────────────────────────────────────────────
+    echo ""
+    echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BOLD}  │  第二步：选择 Embedding 模型                        │${NC}"
+    echo -e "${BOLD}  └─────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "  ${BLUE}1)${NC} 本地模型（默认）    — 免费，离线可用，首次下载约 500MB"
+    echo -e "  ${BLUE}2)${NC} 豆包 Embedding      — 2048 维，需要豆包 API Key"
+    echo -e "  ${BLUE}3)${NC} OpenAI 兼容接口      — 如 text-embedding-3-small"
+    echo ""
+    read -p "  请输入选项 [1-3，默认 1]: " _emb_choice
+
+    EMBED_MODEL="paraphrase-multilingual-MiniLM-L12-v2"
+    EMBED_DIM=384
+    EMBED_NOTE="本地免费模型"
+
+    case "$_emb_choice" in
+      2)
+        EMBED_NOTE="豆包 Embedding"
+        ask EMBED_MODEL "Embedding 模型名称" "doubao-embedding-vision-251215"
+        EMBED_DIM=2048
+        if [[ -z "$LLM_API_KEY" || "$_choice" != "1" ]]; then
+            ask_secret EMBED_API_KEY "豆包 API Key（如与上方相同可重复输入）"
+        else
+            EMBED_API_KEY="$LLM_API_KEY"
+            info "复用上方豆包 API Key"
+        fi
+        ;;
+      3)
+        EMBED_NOTE="OpenAI 兼容 Embedding"
+        ask EMBED_MODEL "模型名称" "text-embedding-3-small"
+        ask EMBED_BASE_URL "Base URL" "https://api.openai.com/v1"
+        if [[ -z "$LLM_API_KEY" ]]; then
+            ask_secret EMBED_API_KEY "API Key"
+        else
+            EMBED_API_KEY="$LLM_API_KEY"
+            info "复用上方 API Key"
+        fi
+        EMBED_DIM=1536
+        ;;
+      *)
+        EMBED_NOTE="本地免费模型（paraphrase-multilingual-MiniLM-L12-v2）"
+        ;;
+    esac
+
+    # ── 配置摘要确认 ──────────────────────────────────────────────────────────
+    echo ""
+    echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BOLD}  │  配置摘要                                           │${NC}"
+    echo -e "${BOLD}  └─────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "  大模型:   ${GREEN}${LLM_PROVIDER_LABEL}${NC}"
+    [[ -n "$LLM_BASE_URL" ]] && echo -e "  Base URL: ${LLM_BASE_URL}"
+    [[ -n "$LLM_MODEL" ]]    && echo -e "  模型:     ${LLM_MODEL}"
+    [[ -n "$LLM_API_KEY" ]]  && echo -e "  API Key:  ${LLM_API_KEY:0:6}****"
+    echo ""
+    echo -e "  Embedding: ${GREEN}${EMBED_NOTE}${NC}"
+    echo ""
+    read -p "  确认写入配置？(Y/n): " _confirm
+    if [[ "$_confirm" == "n" || "$_confirm" == "N" ]]; then
+        warn "已取消，请部署完成后手动编辑 backend/.env"
+        # 仍需写入最基础的数据库配置
+    fi
+
+    # ── 写入 .env ─────────────────────────────────────────────────────────────
     cat > "$ENV_FILE" << EOF
-# 数据库配置
+# ── 数据库配置 ──────────────────────────────────
 POSTGRES_SERVER=localhost
 POSTGRES_USER=codex
 POSTGRES_PASSWORD=codex123
 POSTGRES_DB=codex_db
 POSTGRES_PORT=5432
 
-# 文件存储
+# ── 文件存储 ────────────────────────────────────
 UPLOAD_DIR=./uploads
 
-# 本地 Embedding 模型（免费，无需配置）
-EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2
-EMBEDDING_DIM=384
+# ── 大模型配置 ──────────────────────────────────
+LLM_PROVIDER=${LLM_PROVIDER}
+LLM_API_KEY=${LLM_API_KEY}
+LLM_BASE_URL=${LLM_BASE_URL}
+LLM_MODEL=${LLM_MODEL}
 
-# 豆包大模型（可选）
-DOUBAO_API_KEY=${DOUBAO_KEY}
-DOUBAO_MODEL=${DOUBAO_MODEL}
+# ── Embedding 模型 ──────────────────────────────
+EMBEDDING_MODEL=${EMBED_MODEL}
+EMBEDDING_DIM=${EMBED_DIM}
 
-# 网络搜索（可选）
+# ── 网络搜索（可选） ─────────────────────────────
 # WEB_SEARCH_PROVIDER=duckduckgo
 # SERPER_API_KEY=
 EOF
 
-    success ".env 文件已创建: $ENV_FILE"
+    success ".env 配置已写入: $ENV_FILE"
+    echo ""
+    echo -e "  ${YELLOW}提示: 可随时编辑 backend/.env 修改配置，或启动后在「配置」页面调整${NC}"
 }
 
 # ── 配置前端 ────────────────────────────────────────────────────────────────────

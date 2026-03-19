@@ -51,6 +51,15 @@ async def rag_chat(
     db: Session = Depends(get_db)
 ):
     """智能对话 - 支持 RAG 模式、网络搜索和直接对话模式"""
+    import time
+    t_start = time.time()
+    def _elapsed(label: str, t0: float = None):
+        now = time.time()
+        since = now - (t0 or t_start)
+        total = now - t_start
+        print(f"[Chat timing] {label}: +{since:.2f}s (total {total:.2f}s)", flush=True)
+        return now
+
     try:
         history = request.history or []
         web_results = []
@@ -81,6 +90,7 @@ async def rag_chat(
 
         # PageIndex 两阶段检索（有树形索引时优先使用）
         tree_referenced_nodes = []
+        t_search = time.time()
         if request.use_tree_index and not is_comparison:
             results, tree_referenced_nodes = await SearchService.search_with_tree_index(
                 db, request.query, llm_service,
@@ -95,6 +105,7 @@ async def rag_chat(
                 results = SearchService.search(db, request.query, top_k=request.top_k * 2)
         else:
             results = SearchService.search(db, request.query, top_k=request.top_k)
+        t_search = _elapsed("search/tree_index", t_search)
 
         # 如果开启了网络搜索，同时搜索网络
         if request.use_web_search:
@@ -130,9 +141,12 @@ async def rag_chat(
         from app.models.document import Document
         original_doc_info = []  # 记录原始文档查找情况
         original_contents = []  # 原始文档内容
+        t_origdoc = time.time()
         if request.use_original_doc and results:
-            # 获取所有涉及的文档 ID
-            doc_ids = list(set([chunk.document_id for chunk, _ in results]))
+            # 获取所有涉及的文档 ID，按出现频次排序，只取 top-5
+            from collections import Counter
+            doc_id_counts = Counter(chunk.document_id for chunk, _ in results)
+            doc_ids = [doc_id for doc_id, _ in doc_id_counts.most_common(5)]
 
             # 查询文档标题
             documents = db.query(Document).filter(Document.id.in_(doc_ids)).all()
@@ -221,7 +235,10 @@ async def rag_chat(
             else:
                 original_doc_status = "原始文档查找情况：\n✗ 未找到任何原始文档（仅使用知识库片段）"
 
+        t_origdoc = _elapsed("original_doc_lookup", t_origdoc)
+
         # 调用 LLM（不包含原始文档状态）
+        t_llm = time.time()
         if request.use_rag and web_results:
             # 两者都启用时，给出更详细的提示
             answer = await llm_service.rag_chat_with_web(request.query, full_context, history)
@@ -235,6 +252,9 @@ async def rag_chat(
             else:
                 context_chunks = [chunk.content for chunk, _ in results] if results else []
                 answer = await llm_service.rag_chat(request.query, context_chunks, history)
+
+        _elapsed("llm_generate", t_llm)
+        _elapsed("total", t_start)
 
         sources = [
             {

@@ -13,6 +13,7 @@ interface ChatMessage {
   webSources?: any[];
   originalDocStatus?: string;
   treeNodes?: any[];
+  elapsed?: number;  // 耗时（秒）
 }
 
 interface LLMConfig {
@@ -330,8 +331,10 @@ function App() {
     setChatMessages(prev => [...prev, userMessage]);
     setQuery('');
     setChatting(true);
+    const t0 = Date.now();
     try {
       const r = await chatWithRAG(userMessage.content, 20, useRag, useWebSearch, useOriginalDoc, currentHistory);
+      const elapsed = (Date.now() - t0) / 1000;
       setChatMessages(prev => [...prev, {
         role: 'assistant',
         content: r.answer,
@@ -339,9 +342,11 @@ function App() {
         webSources: r.web_sources,
         originalDocStatus: r.original_doc_status,
         treeNodes: r.tree_nodes,
+        elapsed,
       }]);
     } catch (e: any) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: `抱歉，对话失败: ${e.response?.data?.detail || e.message}` }]);
+      const elapsed = (Date.now() - t0) / 1000;
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `抱歉，对话失败: ${e.response?.data?.detail || e.message}`, elapsed }]);
     } finally { setChatting(false); }
   };
 
@@ -368,25 +373,28 @@ function App() {
   };
 
   const handleUpload = async (file: File) => {
+    const t0 = Date.now();
     setUploading(true); setMessage(''); setUploadDone(false);
     setUploadLogs([`正在处理: ${file.name}`]);
     setUploadProgress(0); setUploadTotal(1);
     try {
       const r = await uploadFile(file, forceUpload, overwriteUpload);
 
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       if (r.similar_documents && r.similar_documents.length > 0) {
         const similarTitles = r.similar_documents.map((d: any) => d.title).join('、');
-        setUploadLogs(prev => [...prev, `⚠️ 发现相似文档：${similarTitles}。${r.suggestion || ''}`]);
+        setUploadLogs(prev => [...prev, `⚠️ 发现相似文档：${similarTitles}。${r.suggestion || ''} (${elapsed}s)`]);
         setMessage(`⚠️ 发现相似文档：${similarTitles}`);
       } else {
-        setUploadLogs(prev => [...prev, `✓ ${r.title}（${r.chunks_count} 个文本块）`]);
+        setUploadLogs(prev => [...prev, `✓ ${r.title}（${r.chunks_count} 个文本块，耗时 ${elapsed}s）`]);
         setMessage(`✓ 上传成功: ${r.title}`);
       }
 
       setUploadProgress(1);
       loadDocuments();
     } catch (e: any) {
-      setUploadLogs(prev => [...prev, `❌ ${file.name}: ${e.response?.data?.detail || e.message}`]);
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      setUploadLogs(prev => [...prev, `❌ ${file.name}: ${e.response?.data?.detail || e.message} (${elapsed}s)`]);
       setUploadProgress(1);
       setMessage(`✗ 上传失败: ${e.response?.data?.detail || e.message}`);
     } finally {
@@ -414,30 +422,36 @@ function App() {
     setUploading(true); setMessage(''); setUploadDone(false);
     setUploadLogs([`发现 ${supported.length} 个文件（${typeDesc}），开始上传...`]);
     setUploadProgress(0); setUploadTotal(supported.length);
+    const batchT0 = Date.now();
     let successCount = 0, totalChunks = 0;
     for (let i = 0; i < supported.length; i++) {
       const file = supported[i];
       const relativePath = (file as any).webkitRelativePath || file.name;
       setUploadLogs(prev => [...prev, `正在处理 (${i + 1}/${supported.length}): ${relativePath}`]);
+      const fileT0 = Date.now();
       try {
         const r = await uploadFile(file, forceUpload, overwriteUpload);
+        const fileElapsed = ((Date.now() - fileT0) / 1000).toFixed(1);
 
         // 检查是否是相似文档提示
         if (r.similar_documents && r.similar_documents.length > 0) {
           const similarTitles = r.similar_documents.map((d: any) => d.title).join('、');
-          setUploadLogs(prev => [...prev, `⚠️ ${relativePath}: 发现相似文档 ${similarTitles}`]);
+          setUploadLogs(prev => [...prev, `⚠️ ${relativePath}: 发现相似文档 ${similarTitles} (${fileElapsed}s)`]);
         } else {
           successCount++;
           totalChunks += r.chunks_count || 0;
-          setUploadLogs(prev => [...prev, `✓ ${relativePath} (${r.chunks_count} 个文本块)`]);
+          setUploadLogs(prev => [...prev, `✓ ${relativePath} (${r.chunks_count} 个文本块，${fileElapsed}s)`]);
         }
 
         setUploadProgress(i + 1);
       } catch (e: any) {
-        setUploadLogs(prev => [...prev, `❌ ${relativePath}: ${e.response?.data?.detail || e.message}`]);
+        const fileElapsed = ((Date.now() - fileT0) / 1000).toFixed(1);
+        setUploadLogs(prev => [...prev, `❌ ${relativePath}: ${e.response?.data?.detail || e.message} (${fileElapsed}s)`]);
         setUploadProgress(i + 1);
       }
     }
+    const batchElapsed = ((Date.now() - batchT0) / 1000).toFixed(1);
+    setUploadLogs(prev => [...prev, `完成：${successCount} 个文件，${totalChunks} 个文本块，总耗时 ${batchElapsed}s`]);
     setMessage(`✓ 上传完成: ${successCount} 个文件，${totalChunks} 个文本块`);
     loadDocuments(); setUploading(false); setUploadDone(true);
     e.target.value = '';
@@ -571,6 +585,11 @@ function App() {
                     );
                   })() : (
                     <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  )}
+                  {msg.role === 'assistant' && msg.elapsed !== undefined && (
+                    <div className="mt-3 text-xs text-gray-400">
+                      {language === 'zh' ? '耗时' : 'Time'}: {msg.elapsed.toFixed(1)}s
+                    </div>
                   )}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-gray-700">

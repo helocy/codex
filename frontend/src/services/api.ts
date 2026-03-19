@@ -155,6 +155,11 @@ export const batchBuildTreeIndex = async () => {
   return response.data;
 };
 
+export const findDuplicates = async (threshold: number = 0.92) => {
+  const response = await api.get('/admin/duplicates', { params: { threshold } });
+  return response.data;
+};
+
 export const getOriginalDocPaths = async () => {
   const response = await api.get('/admin/original-doc-paths');
   return response.data;

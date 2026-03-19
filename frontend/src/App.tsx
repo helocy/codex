@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex } from './services/api';
+import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates } from './services/api';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import { useTranslation } from './i18n/useTranslation';
 import './index.css';
@@ -124,6 +124,10 @@ function App() {
   const [confirm, setConfirm] = useState<ConfirmDialog>({ visible: false, title: '', message: '', onConfirm: () => {} });
   const [exporting, setExporting] = useState(false);
   const [batchBuilding, setBatchBuilding] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<any[][]>([]);
+  const [duplicateSearching, setDuplicateSearching] = useState(false);
+  const [duplicateSearched, setDuplicateSearched] = useState(false);
+  const [duplicateKeep, setDuplicateKeep] = useState<Record<number, number>>({});  // groupIndex -> doc.id to keep
 
   // 自动滚到底部
   useEffect(() => {
@@ -243,6 +247,50 @@ function App() {
       setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     } finally {
       setBatchBuilding(false);
+    }
+  };
+
+  const handleFindDuplicates = async () => {
+    setDuplicateSearching(true);
+    setDuplicateSearched(false);
+    setDuplicateGroups([]);
+    setDuplicateKeep({});
+    try {
+      const result = await findDuplicates(0.97);
+      setDuplicateGroups(result.groups || []);
+      // 默认保留每组中 chunk 数最多的文档
+      const defaultKeep: Record<number, number> = {};
+      (result.groups || []).forEach((group: any[], gi: number) => {
+        const best = group.reduce((a: any, b: any) => (b.chunk_count > a.chunk_count ? b : a));
+        defaultKeep[gi] = best.id;
+      });
+      setDuplicateKeep(defaultKeep);
+    } catch (e: any) {
+      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setDuplicateSearching(false);
+      setDuplicateSearched(true);
+    }
+  };
+
+  const handleDeleteDuplicates = async () => {
+    const toDelete: number[] = [];
+    duplicateGroups.forEach((group, gi) => {
+      const keepId = duplicateKeep[gi];
+      group.forEach((doc: any) => {
+        if (doc.id !== keepId) toDelete.push(doc.id);
+      });
+    });
+    if (toDelete.length === 0) return;
+    try {
+      for (const id of toDelete) await deleteDocument(id);
+      setAdminMessage(`✓ 已删除 ${toDelete.length} 个冗余文档`);
+      setDuplicateGroups([]);
+      setDuplicateSearched(false);
+      loadDocuments();
+      loadDbStats();
+    } catch (e: any) {
+      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     }
   };
 
@@ -883,6 +931,78 @@ function App() {
               {adminMessage && (
                 <div className={`text-sm px-4 py-3 rounded-xl whitespace-pre-wrap ${adminMessage.includes('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                   {adminMessage}
+                </div>
+              )}
+
+              {isLocalhost && (
+                <div className="bg-white rounded-2xl shadow-md p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">{language === 'zh' ? '冗余文档检测' : 'Duplicate Detection'}</h3>
+                      <p className="text-xs text-gray-400 mt-0.5">{language === 'zh' ? '找出内容高度相似的文档，帮助清理知识库' : 'Find highly similar documents to clean up the knowledge base'}</p>
+                    </div>
+                    <button
+                      onClick={handleFindDuplicates}
+                      disabled={duplicateSearching}
+                      className="px-4 py-2 bg-orange-500 text-white rounded-xl hover:bg-orange-600 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {duplicateSearching ? (language === 'zh' ? '检测中...' : 'Scanning...') : (language === 'zh' ? '搜索冗余文档' : 'Find Duplicates')}
+                    </button>
+                  </div>
+
+                  {duplicateSearched && duplicateGroups.length === 0 && (
+                    <div className="text-sm text-green-600 bg-green-50 rounded-xl px-4 py-3">
+                      {language === 'zh' ? '未发现冗余文档' : 'No duplicates found'}
+                    </div>
+                  )}
+
+                  {duplicateGroups.length > 0 && (
+                    <div className="space-y-4">
+                      <p className="text-sm text-amber-700 bg-amber-50 rounded-xl px-4 py-2">
+                        {language === 'zh' ? `发现 ${duplicateGroups.length} 组冗余文档，请选择每组中要保留的文档：` : `Found ${duplicateGroups.length} duplicate groups. Select which document to keep in each group:`}
+                      </p>
+                      {duplicateGroups.map((group, gi) => (
+                        <div key={gi} className="border border-orange-100 rounded-xl p-4 bg-orange-50">
+                          <p className="text-xs font-medium text-orange-700 mb-3">{language === 'zh' ? `第 ${gi + 1} 组` : `Group ${gi + 1}`}</p>
+                          <div className="space-y-2">
+                            {group.map((doc: any) => (
+                              <label key={doc.id} className="flex items-center gap-3 cursor-pointer group">
+                                <input
+                                  type="radio"
+                                  name={`dup-group-${gi}`}
+                                  checked={duplicateKeep[gi] === doc.id}
+                                  onChange={() => setDuplicateKeep(prev => ({ ...prev, [gi]: doc.id }))}
+                                  className="accent-orange-500"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium text-gray-800 truncate block">{doc.title}</span>
+                                  <span className="text-xs text-gray-400">
+                                    {doc.file_type} · {doc.chunk_count} {language === 'zh' ? '个文本块' : 'chunks'}
+                                    {' · '}{language === 'zh' ? '综合相似度' : 'score'} {(doc.max_similarity * 100).toFixed(1)}%
+                                    {doc.emb_similarity !== undefined && ` · embedding ${(doc.emb_similarity * 100).toFixed(1)}%`}
+                                    {doc.created_at && ` · ${new Date(doc.created_at).toLocaleDateString()}`}
+                                  </span>
+                                </div>
+                                {duplicateKeep[gi] === doc.id
+                                  ? <span className="text-xs text-green-600 font-medium shrink-0">{language === 'zh' ? '保留' : 'Keep'}</span>
+                                  : <span className="text-xs text-red-400 shrink-0">{language === 'zh' ? '删除' : 'Delete'}</span>
+                                }
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <button
+                        onClick={handleDeleteDuplicates}
+                        className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium"
+                      >
+                        {language === 'zh'
+                          ? `删除未选中的 ${duplicateGroups.reduce((n, g, gi) => n + g.filter((d: any) => d.id !== duplicateKeep[gi]).length, 0)} 个冗余文档`
+                          : `Delete ${duplicateGroups.reduce((n, g, gi) => n + g.filter((d: any) => d.id !== duplicateKeep[gi]).length, 0)} duplicate documents`
+                        }
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

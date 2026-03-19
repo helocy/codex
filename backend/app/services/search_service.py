@@ -237,7 +237,7 @@ class SearchService:
         if docs_with_tree and use_tree:
             # 预筛选：用 BM25 在文档标题上过滤，只取最相关的 Top-N 个文档送给 LLM
             # 避免全量文档目录超出 LLM context 限制
-            filtered_docs = SearchService._prefilter_docs(query, docs_with_tree, max_docs=15)
+            filtered_docs = SearchService._prefilter_docs(query, docs_with_tree, max_docs=6)
             relevant_node_ids, referenced_nodes = await SearchService._tree_search_phase(
                 query, filtered_docs, llm_service
             )

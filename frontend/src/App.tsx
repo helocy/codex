@@ -226,6 +226,20 @@ function App() {
       try {
         await deleteDocument(doc.id);
         setAdminMessage(`${t.msgSuccess} ${t.msgDeleteSuccess}：${doc.title}`);
+        // 从冗余组中移除已删除的文档，组内只剩1个时整组消除
+        setDuplicateGroups(prev => {
+          const updated = prev
+            .map(group => group.filter((d: any) => d.id !== doc.id))
+            .filter(group => group.length >= 2);
+          return updated;
+        });
+        setDuplicateKeep(prev => {
+          const updated = { ...prev };
+          Object.keys(updated).forEach(gi => {
+            if (updated[Number(gi)] === doc.id) delete updated[Number(gi)];
+          });
+          return updated;
+        });
         await loadDocuments(); await loadDbStats();
       } catch (e: any) { setAdminMessage(`${t.msgError} ${language === 'zh' ? '删除失败' : 'Delete failed'}：${e.response?.data?.detail || e.message}`); }
     });
@@ -285,10 +299,12 @@ function App() {
     try {
       for (const id of toDelete) await deleteDocument(id);
       setAdminMessage(`✓ 已删除 ${toDelete.length} 个冗余文档`);
+      // 删除后重新检测，刷新冗余组
       setDuplicateGroups([]);
+      setDuplicateKeep({});
       setDuplicateSearched(false);
-      loadDocuments();
-      loadDbStats();
+      await loadDocuments();
+      await loadDbStats();
     } catch (e: any) {
       setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     }

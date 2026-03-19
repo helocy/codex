@@ -16,6 +16,71 @@ def _tokenize(text: str) -> List[str]:
     return re.findall(r'\w+', text.lower())
 
 
+# ── 全局 BM25 缓存 ───────────────────────────────────────────────────────────
+class _BM25Cache:
+    """缓存 BM25 索引，chunk 集合不变时复用，避免每次搜索重建"""
+    def __init__(self):
+        self._bm25: Optional[BM25Okapi] = None
+        self._chunk_ids: List[int] = []
+        self._chunks: List = []
+
+    def get(self, chunks: List) -> Tuple[BM25Okapi, List]:
+        ids = [c.id for c in chunks]
+        if ids != self._chunk_ids:
+            corpus = [_tokenize(c.content) for c in chunks]
+            self._bm25 = BM25Okapi(corpus)
+            self._chunk_ids = ids
+            self._chunks = chunks
+            logger.debug(f"[BM25Cache] 重建索引，共 {len(chunks)} 个 chunk")
+        return self._bm25, self._chunks
+
+    def invalidate(self):
+        self._chunk_ids = []
+        self._bm25 = None
+
+
+_bm25_cache = _BM25Cache()
+
+
+# ── 全局 Embedding 内存缓存 ──────────────────────────────────────────────────
+class _EmbeddingCache:
+    """将所有 chunk embedding 缓存为 numpy 矩阵，避免每次从数据库全量读取"""
+    def __init__(self):
+        self._matrix: Optional[np.ndarray] = None   # shape: (N, dim)
+        self._norms: Optional[np.ndarray] = None    # shape: (N,)
+        self._chunk_ids: List[int] = []
+        self._chunks: List = []  # 仅元数据（不含 embedding）
+
+    def _is_valid(self, chunks: List) -> bool:
+        if self._matrix is None:
+            return False
+        return [c.id for c in chunks] == self._chunk_ids
+
+    def load(self, chunks: List) -> Tuple[np.ndarray, np.ndarray, List]:
+        """返回 (matrix, norms, chunks)，命中缓存直接返回，否则重建"""
+        if self._is_valid(chunks):
+            return self._matrix, self._norms, self._chunks
+
+        logger.info(f"[EmbeddingCache] 重建矩阵，共 {len(chunks)} 个 chunk")
+        matrix = np.array([c.embedding for c in chunks], dtype=np.float32)
+        norms = np.linalg.norm(matrix, axis=1)
+        norms[norms == 0] = 1e-9
+        self._matrix = matrix
+        self._norms = norms
+        self._chunk_ids = [c.id for c in chunks]
+        self._chunks = chunks
+        return self._matrix, self._norms, self._chunks
+
+    def invalidate(self):
+        self._matrix = None
+        self._norms = None
+        self._chunk_ids = []
+        self._chunks = []
+
+
+_emb_cache = _EmbeddingCache()
+
+
 class SearchService:
     @staticmethod
     def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -44,28 +109,37 @@ class SearchService:
         return sorted_results[:top_k * 2]  # 返回更多结果
 
     @staticmethod
+    def invalidate_cache():
+        """文档增删后调用，使 BM25 和 embedding 缓存失效"""
+        _bm25_cache.invalidate()
+        _emb_cache.invalidate()
+
+    @staticmethod
     def search(db: Session, query: str, top_k: int = 10) -> List[Tuple[Chunk, float]]:
         """BM25 + 向量混合检索，RRF 融合，相邻 chunk 合并"""
-        chunks = db.query(Chunk).all()
-        if not chunks:
-            return []
+        # 缓存命中时直接用内存数据，跳过 DB 全量读取
+        if _emb_cache._matrix is not None and _emb_cache._chunks:
+            valid_chunks = _emb_cache._chunks
+        else:
+            chunks = db.query(Chunk).all()
+            if not chunks:
+                return []
+            valid_chunks = [c for c in chunks if c.embedding]
+            if not valid_chunks:
+                return []
 
-        valid_chunks = [c for c in chunks if c.embedding]
-        if not valid_chunks:
-            return []
-
-        # ── 1. 向量检索 ──────────────────────────────────────────────
+        # ── 1. 向量检索（内存矩阵缓存，避免重复从 DB 读取 embedding）──
         query_emb = embedding_service.encode_single(query)
-        vec_scores: Dict[int, float] = {}
-        for chunk in valid_chunks:
-            emb = np.array(chunk.embedding, dtype=np.float32)
-            vec_scores[chunk.id] = SearchService.cosine_similarity(query_emb, emb)
-
+        emb_matrix, norms, _ = _emb_cache.load(valid_chunks)
+        query_norm = float(np.linalg.norm(query_emb)) or 1e-9
+        cos_scores = emb_matrix.dot(query_emb) / (norms * query_norm)
+        vec_scores: Dict[int, float] = {
+            valid_chunks[i].id: float(cos_scores[i]) for i in range(len(valid_chunks))
+        }
         vec_ranked = sorted(valid_chunks, key=lambda c: vec_scores[c.id], reverse=True)
 
-        # ── 2. BM25 关键词检索 ────────────────────────────────────────
-        corpus = [_tokenize(c.content) for c in valid_chunks]
-        bm25 = BM25Okapi(corpus)
+        # ── 2. BM25 关键词检索（使用缓存索引）───────────────────────
+        bm25, _ = _bm25_cache.get(valid_chunks)
         query_tokens = _tokenize(query)
         bm25_raw = bm25.get_scores(query_tokens)
         bm25_scores: Dict[int, float] = {
@@ -314,14 +388,18 @@ class SearchService:
 
         query_emb = embedding_service.encode_single(query)
 
-        # 向量检索
-        vec_scores: Dict[int, float] = {}
-        for chunk in valid_chunks:
-            emb = np.array(chunk.embedding, dtype=np.float32)
-            vec_scores[chunk.id] = SearchService.cosine_similarity(query_emb, emb)
+        # 向量检索（矩阵化）
+        emb_matrix = np.array([c.embedding for c in valid_chunks], dtype=np.float32)
+        norms = np.linalg.norm(emb_matrix, axis=1)
+        norms[norms == 0] = 1e-9
+        query_norm = np.linalg.norm(query_emb) or 1e-9
+        cos_scores = emb_matrix.dot(query_emb) / (norms * query_norm)
+        vec_scores: Dict[int, float] = {
+            valid_chunks[i].id: float(cos_scores[i]) for i in range(len(valid_chunks))
+        }
         vec_ranked = sorted(valid_chunks, key=lambda c: vec_scores[c.id], reverse=True)
 
-        # BM25
+        # BM25（_hybrid_search 用于 section 内检索，chunk 集合小且每次不同，不用全局缓存）
         corpus = [_tokenize(c.content) for c in valid_chunks]
         bm25 = BM25Okapi(corpus)
         bm25_raw = bm25.get_scores(_tokenize(query))

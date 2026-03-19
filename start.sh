@@ -34,12 +34,12 @@ echo "启动后端 http://localhost:8001 ..."
 cd "$BACKEND_DIR"
 if [ -d "venv" ]; then
     source venv/bin/activate
-    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload \
+    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
         > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
     deactivate
 else
-    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload \
+    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
         > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
 fi

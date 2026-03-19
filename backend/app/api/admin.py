@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.document import Document, Chunk
 from app.services.embedding_service import embedding_service
 from app.services.original_doc_service import original_doc_service
+from app.services.search_service import SearchService
 import os
 import json
 import io
@@ -91,6 +92,7 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
     db.query(Chunk).filter(Chunk.document_id == document_id).delete()
     db.delete(document)
     db.commit()
+    SearchService.invalidate_cache()
 
     return {"message": f"文档 #{document_id} 已删除"}
 
@@ -110,6 +112,7 @@ async def reset_database(db: Session = Depends(get_db)):
     db.query(Chunk).delete()
     db.query(Document).delete()
     db.commit()
+    SearchService.invalidate_cache()
 
     return {"message": "知识库已重置，所有数据已清空"}
 

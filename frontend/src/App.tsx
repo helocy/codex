@@ -1001,7 +1001,26 @@ function App() {
                                 </div>
                                 {duplicateKeep[gi] === doc.id
                                   ? <span className="text-xs text-green-600 font-medium shrink-0">{language === 'zh' ? '保留' : 'Keep'}</span>
-                                  : <span className="text-xs text-red-400 shrink-0">{language === 'zh' ? '删除' : 'Delete'}</span>
+                                  : <button
+                                      className="text-xs text-red-500 hover:text-red-700 hover:underline shrink-0 font-medium"
+                                      onClick={async (e) => {
+                                        e.preventDefault();
+                                        try {
+                                          await deleteDocument(doc.id);
+                                          setDuplicateGroups(prev =>
+                                            prev
+                                              .map(g => g.filter((d: any) => d.id !== doc.id))
+                                              .filter(g => g.length >= 2)
+                                          );
+                                          await loadDocuments();
+                                          await loadDbStats();
+                                        } catch (err: any) {
+                                          setAdminMessage(`${t.msgError} ${err.response?.data?.detail || err.message}`);
+                                        }
+                                      }}
+                                    >
+                                      {language === 'zh' ? '删除' : 'Delete'}
+                                    </button>
                                 }
                               </label>
                             ))}

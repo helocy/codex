@@ -74,6 +74,132 @@ async def get_stats(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/duplicates")
+async def find_duplicates(threshold: float = 0.97, db: Session = Depends(get_db)):
+    """检测冗余文档：用每篇文档前5个chunk的平均向量做两两比较，返回高度相似的文档对"""
+    import numpy as np
+    from collections import defaultdict
+
+    # 取每篇文档前5个chunk，计算平均向量作为文档代表
+    all_chunks = (
+        db.query(Chunk)
+        .filter(Chunk.chunk_index < 5)
+        .all()
+    )
+
+    # 按文档分组，计算平均 embedding
+    doc_chunks: dict = defaultdict(list)
+    for c in all_chunks:
+        if c.embedding:
+            doc_chunks[c.document_id].append(np.array(c.embedding, dtype=np.float32))
+
+    if len(doc_chunks) < 2:
+        return {"groups": [], "threshold": threshold}
+
+    doc_ids = list(doc_chunks.keys())
+    # 平均向量并归一化
+    avg_vecs = []
+    for did in doc_ids:
+        v = np.mean(doc_chunks[did], axis=0)
+        norm = np.linalg.norm(v)
+        avg_vecs.append(v / (norm if norm > 1e-9 else 1.0))
+    matrix = np.array(avg_vecs, dtype=np.float32)
+
+    # 两两余弦相似度
+    sim_matrix = matrix @ matrix.T
+
+    # 查询文档元信息和 chunk 数量
+    doc_map = {doc.id: doc for doc in db.query(Document).all()}
+    chunk_count_map = {
+        row[0]: row[1]
+        for row in db.query(Chunk.document_id, func.count(Chunk.id)).group_by(Chunk.document_id).all()
+    }
+
+    # 文件名相似度（取 basename，字符级 bigram Jaccard）
+    import os
+    def _name_sim(a: str, b: str) -> float:
+        a = os.path.basename(a).lower()
+        b = os.path.basename(b).lower()
+        if a == b:
+            return 1.0
+        sa = {a[i:i+2] for i in range(len(a) - 1)}
+        sb = {b[i:i+2] for i in range(len(b) - 1)}
+        if not sa or not sb:
+            return 0.0
+        return len(sa & sb) / len(sa | sb)
+
+    titles = [doc_map.get(did, None) for did in doc_ids]
+    title_strs = [t.title if t else '' for t in titles]
+
+    # 综合得分 = embedding_sim * 0.7 + name_sim * 0.3
+    # 只要综合得分 >= threshold 就视为冗余
+    def _combined(i, j):
+        emb = float(sim_matrix[i, j])
+        name = _name_sim(title_strs[i], title_strs[j])
+        return emb * 0.7 + name * 0.3
+
+    # 用 union-find 合并
+    parent = list(range(len(doc_ids)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        parent[find(x)] = find(y)
+
+    for i in range(len(doc_ids)):
+        for j in range(i + 1, len(doc_ids)):
+            if _combined(i, j) >= threshold:
+                union(i, j)
+
+    # 按根节点分组
+    groups_map: dict = defaultdict(set)
+    for i in range(len(doc_ids)):
+        root = find(i)
+        # 检查该文档是否真的与组内某个成员相似（避免孤立节点混入）
+        if any(i != j and _combined(i, j) >= threshold for j in range(len(doc_ids))):
+            groups_map[root].add(i)
+
+    groups = []
+    for indices in groups_map.values():
+        if len(indices) < 2:
+            continue
+        # 限制每组最多显示 20 个，按 chunk 数降序
+        idx_list = sorted(indices, key=lambda i: chunk_count_map.get(doc_ids[i], 0), reverse=True)[:20]
+        docs_in_group = []
+        for idx in idx_list:
+            doc_id = doc_ids[idx]
+            doc = doc_map.get(doc_id)
+            if not doc:
+                continue
+            max_sim = max(
+                (_combined(idx, j) for j in indices if j != idx),
+                default=0.0
+            )
+            emb_sim = max(
+                (float(sim_matrix[idx, j]) for j in indices if j != idx),
+                default=0.0
+            )
+            docs_in_group.append({
+                "id": doc.id,
+                "title": doc.title,
+                "file_type": doc.file_type,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "chunk_count": chunk_count_map.get(doc_id, 0),
+                "max_similarity": round(max_sim, 4),
+                "emb_similarity": round(emb_sim, 4),
+            })
+        if len(docs_in_group) >= 2:
+            groups.append(docs_in_group)
+
+    # 按组内最高相似度降序
+    groups.sort(key=lambda g: max(d["max_similarity"] for d in g), reverse=True)
+    return {"groups": groups, "threshold": threshold}
+
+
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: int, db: Session = Depends(get_db)):
     """删除指定文档及其所有向量块"""

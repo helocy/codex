@@ -128,6 +128,7 @@ function App() {
   const [duplicateSearching, setDuplicateSearching] = useState(false);
   const [duplicateSearched, setDuplicateSearched] = useState(false);
   const [duplicateKeep, setDuplicateKeep] = useState<Record<number, number>>({});  // groupIndex -> doc.id to keep
+  const [configTab, setConfigTab] = useState<'model' | 'database' | 'docs'>('model');
 
   // 自动滚到底部
   useEffect(() => {
@@ -447,8 +448,32 @@ function App() {
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       if (r.similar_documents && r.similar_documents.length > 0) {
         const similarTitles = r.similar_documents.map((d: any) => d.title).join('、');
-        setUploadLogs(prev => [...prev, `⚠️ 发现相似文档：${similarTitles}。${r.suggestion || ''} (${elapsed}s)`]);
-        setMessage(`⚠️ 发现相似文档：${similarTitles}`);
+        setUploadLogs(prev => [...prev, `⚠️ 发现相似文档：${similarTitles} (${elapsed}s)`]);
+        setUploading(false); setUploadDone(true);
+        // 弹出确认框让用户决定是否强制上传
+        showConfirm(
+          language === 'zh' ? '发现相似文档' : 'Similar documents found',
+          (language === 'zh'
+            ? `已存在相似文档：${similarTitles}\n\n是否仍要继续上传？`
+            : `Similar documents already exist: ${similarTitles}\n\nContinue uploading anyway?`),
+          async () => {
+            setConfirm(p => ({ ...p, visible: false }));
+            setUploading(true); setUploadDone(false);
+            try {
+              const r2 = await uploadFile(file, true, overwriteUpload);
+              const e2 = ((Date.now() - t0) / 1000).toFixed(1);
+              setUploadLogs(prev => [...prev, `✓ ${r2.title}（${r2.chunks_count} 个文本块，耗时 ${e2}s）`]);
+              setMessage(`✓ 上传成功: ${r2.title}`);
+              setUploadProgress(1);
+              loadDocuments();
+            } catch (err: any) {
+              setMessage(`✗ 上传失败: ${err.response?.data?.detail || err.message}`);
+            } finally {
+              setUploading(false); setUploadDone(true);
+            }
+          }
+        );
+        return;
       } else {
         setUploadLogs(prev => [...prev, `✓ ${r.title}（${r.chunks_count} 个文本块，耗时 ${elapsed}s）`]);
         setMessage(`✓ 上传成功: ${r.title}`);
@@ -729,20 +754,27 @@ function App() {
           {mode === 'config' && (
             <div className="w-full max-w-4xl space-y-6">
 
-              {/* Stats Cards */}
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { label: t.configDocCount, value: statsLoading ? t.statsLoading : dbStats?.document_count ?? t.statsNoData, icon: '📄' },
-                  { label: t.configChunkCount, value: statsLoading ? t.statsLoading : dbStats?.chunk_count ?? t.statsNoData, icon: '🧩' },
-                  { label: t.configDbSize, value: statsLoading ? t.statsLoading : dbStats?.db_size ?? t.statsNoData, icon: '💾' },
-                ].map((card) => (
-                  <div key={card.label} className="bg-white rounded-2xl p-6 shadow-md text-center">
-                    <div className="text-3xl mb-2">{card.icon}</div>
-                    <div className="text-2xl font-bold text-gray-900">{card.value}</div>
-                    <div className="text-sm text-gray-500 mt-1">{card.label}</div>
-                  </div>
-                ))}
+              {/* Tab Bar */}
+              <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                {(['model', 'database', 'docs'] as const).map((tab) => {
+                  const labels = { model: language === 'zh' ? '模型配置' : 'Model', database: language === 'zh' ? '数据库配置' : 'Database', docs: language === 'zh' ? '文档列表' : 'Documents' };
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setConfigTab(tab)}
+                      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+                        configTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {labels[tab]}
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* ===== 模型配置 Tab ===== */}
+              {configTab === 'model' && (
+                <div className="space-y-6">
 
               {/* LLM + Embedding Config (localhost only) */}
               {isLocalhost && (
@@ -866,6 +898,27 @@ function App() {
                   </div>
                 </>
               )}
+                </div>
+              )}
+
+              {/* ===== 数据库配置 Tab ===== */}
+              {configTab === 'database' && (
+                <div className="space-y-6">
+
+              {/* Stats Cards */}
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: t.configDocCount, value: statsLoading ? t.statsLoading : dbStats?.document_count ?? t.statsNoData, icon: '📄' },
+                  { label: t.configChunkCount, value: statsLoading ? t.statsLoading : dbStats?.chunk_count ?? t.statsNoData, icon: '🧩' },
+                  { label: t.configDbSize, value: statsLoading ? t.statsLoading : dbStats?.db_size ?? t.statsNoData, icon: '💾' },
+                ].map((card) => (
+                  <div key={card.label} className="bg-white rounded-2xl p-6 shadow-md text-center">
+                    <div className="text-3xl mb-2">{card.icon}</div>
+                    <div className="text-2xl font-bold text-gray-900">{card.value}</div>
+                    <div className="text-sm text-gray-500 mt-1">{card.label}</div>
+                  </div>
+                ))}
+              </div>
 
               {/* 原始文档搜索路径 (localhost only) */}
               {isLocalhost && (
@@ -1040,6 +1093,12 @@ function App() {
                   )}
                 </div>
               )}
+                </div>
+              )}
+
+              {/* ===== 文档列表 Tab ===== */}
+              {configTab === 'docs' && (
+                <div className="space-y-6">
 
               <div className="bg-white rounded-2xl shadow-md overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-4">
@@ -1128,6 +1187,9 @@ function App() {
                   );
                 })()}
               </div>
+                </div>
+              )}
+
             </div>
           )}
 

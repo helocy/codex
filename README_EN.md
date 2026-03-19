@@ -97,6 +97,8 @@ The system automatically finds original documents based on knowledge base retrie
 - Export/import backups (including vector data)
 - Embedding model compatibility check
 - Document deletion and knowledge base reset
+- **Duplicate Detection**: Find redundant documents using vector similarity + filename similarity; supports individual or batch deletion
+- Settings page Tab layout (Model Config / Database / Documents)
 
 ### 6. External API (AI Agent Integration)
 

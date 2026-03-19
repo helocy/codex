@@ -383,6 +383,19 @@ def generate_sse_events(directory_path: str, db: Session, skip_duplicate: bool =
                         db.query(Chunk).filter(Chunk.document_id == existing_doc.id).delete()
                         db.delete(existing_doc)
                         db.commit()
+
+                # ===== 内容相似检查（仅在 skip_duplicate=True 时跳过相似文档）=====
+                if skip_duplicate and text.strip():
+                    similar_docs = find_similar_documents(db, text, title, threshold=0.92)
+                    if similar_docs:
+                        skipped_count += 1
+                        similar_titles = ', '.join(d['title'] for d in similar_docs[:2])
+                        yield json.dumps({
+                            "type": "skip",
+                            "message": f"跳过相似文档: {file_name}（与「{similar_titles}」内容相似）",
+                            "file": file_name
+                        }) + "\n"
+                        continue
                         yield json.dumps({
                             "type": "replacing",
                             "message": f"替换旧文档: {file_name}（旧 ID: {existing_doc.id}）",

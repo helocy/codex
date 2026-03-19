@@ -8,6 +8,7 @@ from app.services.file_processor import FileProcessor
 from app.services.embedding_service import embedding_service
 from app.services.page_index_service import page_index_service
 from app.services.llm_service import llm_service
+from app.services.search_service import SearchService
 from pydantic import BaseModel
 import os
 import shutil
@@ -102,6 +103,7 @@ async def save_text(
             db.add(chunk)
 
         db.commit()
+        SearchService.invalidate_cache()
 
         # 后台异步生成树形索引
         if background_tasks is not None:
@@ -286,6 +288,7 @@ async def upload_file(
             db.add(chunk)
 
         db.commit()
+        SearchService.invalidate_cache()
 
         # 后台异步生成树形索引（不阻塞响应）
         if background_tasks is not None:
@@ -441,6 +444,9 @@ def generate_sse_events(directory_path: str, db: Session, skip_duplicate: bool =
         if skipped_count > 0:
             msg += f"，跳过 {skipped_count} 个重复文档"
         msg += f"，{total_chunks} 个文本块"
+
+        if uploaded_count > 0:
+            SearchService.invalidate_cache()
 
         yield json.dumps({
             "type": "complete",

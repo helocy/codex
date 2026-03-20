@@ -134,7 +134,14 @@ async def rag_chat(
                     merged_content = "\n\n".join(contents)
                     context_parts.append(f"【文档 {doc_id}】\n{merged_content}")
             else:
-                context_chunks = [chunk.content for chunk, _ in results]
+                # 查询文档标题，让 LLM 知道每个片段来自哪个文档
+                from app.models.document import Document as Doc
+                doc_ids_in_results = list({chunk.document_id for chunk, _ in results})
+                doc_title_map_r = {d.id: d.title for d in db.query(Doc).filter(Doc.id.in_(doc_ids_in_results)).all()}
+                context_chunks = [
+                    f"[来源：{doc_title_map_r.get(chunk.document_id, str(chunk.document_id))}]\n{chunk.content}"
+                    for chunk, _ in results
+                ]
                 context_parts.append("【知识库文档】\n" + "\n\n---\n\n".join(context_chunks))
 
         # 如果启用了原始文档搜索

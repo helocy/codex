@@ -127,7 +127,7 @@ function App() {
   const [duplicateGroups, setDuplicateGroups] = useState<any[][]>([]);
   const [duplicateSearching, setDuplicateSearching] = useState(false);
   const [duplicateSearched, setDuplicateSearched] = useState(false);
-  const [duplicateKeep, setDuplicateKeep] = useState<Record<number, number>>({});  // groupIndex -> doc.id to keep
+  const [docsMessage, setDocsMessage] = useState('');
   const [configTab, setConfigTab] = useState<'model' | 'database' | 'docs'>('model');
 
   // 自动滚到底部
@@ -226,40 +226,32 @@ function App() {
       setConfirm(p => ({ ...p, visible: false }));
       try {
         await deleteDocument(doc.id);
-        setAdminMessage(`${t.msgSuccess} ${t.msgDeleteSuccess}：${doc.title}`);
+        setDocsMessage(`${t.msgSuccess} ${t.msgDeleteSuccess}：${doc.title}`);
         // 从冗余组中移除已删除的文档，组内只剩1个时整组消除
-        setDuplicateGroups(prev => {
-          const updated = prev
+        setDuplicateGroups(prev =>
+          prev
             .map(group => group.filter((d: any) => d.id !== doc.id))
-            .filter(group => group.length >= 2);
-          return updated;
-        });
-        setDuplicateKeep(prev => {
-          const updated = { ...prev };
-          Object.keys(updated).forEach(gi => {
-            if (updated[Number(gi)] === doc.id) delete updated[Number(gi)];
-          });
-          return updated;
-        });
+            .filter(group => group.length >= 2)
+        );
         await loadDocuments(); await loadDbStats();
-      } catch (e: any) { setAdminMessage(`${t.msgError} ${language === 'zh' ? '删除失败' : 'Delete failed'}：${e.response?.data?.detail || e.message}`); }
+      } catch (e: any) { setDocsMessage(`${t.msgError} ${language === 'zh' ? '删除失败' : 'Delete failed'}：${e.response?.data?.detail || e.message}`); }
     });
   };
 
   const handleBatchBuildTreeIndex = async () => {
     setBatchBuilding(true);
-    setAdminMessage('');
+    setDocsMessage('');
     try {
       const result = await batchBuildTreeIndex();
       if (result.triggered_count === 0) {
-        setAdminMessage(`✓ ${language === 'zh' ? '所有文档均已有树形索引，无需重建' : 'All documents already have tree index'}`);
+        setDocsMessage(`✓ ${language === 'zh' ? '所有文档均已有树形索引，无需重建' : 'All documents already have tree index'}`);
       } else {
-        setAdminMessage(`✓ ${language === 'zh' ? `已触发 ${result.triggered_count} 篇文档的树形索引构建，后台处理中...` : `Triggered tree index build for ${result.triggered_count} documents, processing in background...`}`);
+        setDocsMessage(`✓ ${language === 'zh' ? `已触发 ${result.triggered_count} 篇文档的树形索引构建，后台处理中...` : `Triggered tree index build for ${result.triggered_count} documents, processing in background...`}`);
       }
       // 延迟刷新列表，让后台有时间处理部分文档
       setTimeout(() => loadDocuments(), 3000);
     } catch (e: any) {
-      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
+      setDocsMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     } finally {
       setBatchBuilding(false);
     }
@@ -269,45 +261,14 @@ function App() {
     setDuplicateSearching(true);
     setDuplicateSearched(false);
     setDuplicateGroups([]);
-    setDuplicateKeep({});
     try {
       const result = await findDuplicates(0.97);
       setDuplicateGroups(result.groups || []);
-      // 默认保留每组中 chunk 数最多的文档
-      const defaultKeep: Record<number, number> = {};
-      (result.groups || []).forEach((group: any[], gi: number) => {
-        const best = group.reduce((a: any, b: any) => (b.chunk_count > a.chunk_count ? b : a));
-        defaultKeep[gi] = best.id;
-      });
-      setDuplicateKeep(defaultKeep);
     } catch (e: any) {
       setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     } finally {
       setDuplicateSearching(false);
       setDuplicateSearched(true);
-    }
-  };
-
-  const handleDeleteDuplicates = async () => {
-    const toDelete: number[] = [];
-    duplicateGroups.forEach((group, gi) => {
-      const keepId = duplicateKeep[gi];
-      group.forEach((doc: any) => {
-        if (doc.id !== keepId) toDelete.push(doc.id);
-      });
-    });
-    if (toDelete.length === 0) return;
-    try {
-      for (const id of toDelete) await deleteDocument(id);
-      setAdminMessage(`✓ 已删除 ${toDelete.length} 个冗余文档`);
-      // 删除后重新检测，刷新冗余组
-      setDuplicateGroups([]);
-      setDuplicateKeep({});
-      setDuplicateSearched(false);
-      await loadDocuments();
-      await loadDbStats();
-    } catch (e: any) {
-      setAdminMessage(`${t.msgError} ${e.response?.data?.detail || e.message}`);
     }
   };
 
@@ -617,7 +578,7 @@ function App() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <h3 className="text-xl font-bold text-gray-900 mb-3">{confirm.title}</h3>
-            <p className="text-gray-600 mb-6 leading-relaxed whitespace-pre-wrap">{confirm.message}</p>
+            <p className="text-gray-600 mb-6 leading-relaxed whitespace-pre-wrap break-all">{confirm.message}</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setConfirm(p => ({ ...p, visible: false }))}
                 className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">{t.actionCancel}</button>
@@ -1028,67 +989,46 @@ function App() {
                   {duplicateGroups.length > 0 && (
                     <div className="space-y-4">
                       <p className="text-sm text-amber-700 bg-amber-50 rounded-xl px-4 py-2">
-                        {language === 'zh' ? `发现 ${duplicateGroups.length} 组冗余文档，请选择每组中要保留的文档：` : `Found ${duplicateGroups.length} duplicate groups. Select which document to keep in each group:`}
+                        {language === 'zh' ? `发现 ${duplicateGroups.length} 组冗余文档：` : `Found ${duplicateGroups.length} duplicate group(s):`}
                       </p>
                       {duplicateGroups.map((group, gi) => (
                         <div key={gi} className="border border-orange-100 rounded-xl p-4 bg-orange-50">
                           <p className="text-xs font-medium text-orange-700 mb-3">{language === 'zh' ? `第 ${gi + 1} 组` : `Group ${gi + 1}`}</p>
                           <div className="space-y-2">
                             {group.map((doc: any) => (
-                              <label key={doc.id} className="flex items-center gap-3 cursor-pointer group">
-                                <input
-                                  type="radio"
-                                  name={`dup-group-${gi}`}
-                                  checked={duplicateKeep[gi] === doc.id}
-                                  onChange={() => setDuplicateKeep(prev => ({ ...prev, [gi]: doc.id }))}
-                                  className="accent-orange-500"
-                                />
+                              <div key={doc.id} className="flex items-center gap-3">
                                 <div className="flex-1 min-w-0">
                                   <span className="text-sm font-medium text-gray-800 truncate block">{doc.title}</span>
                                   <span className="text-xs text-gray-400">
                                     {doc.file_type} · {doc.chunk_count} {language === 'zh' ? '个文本块' : 'chunks'}
-                                    {' · '}{language === 'zh' ? '综合相似度' : 'score'} {(doc.max_similarity * 100).toFixed(1)}%
-                                    {doc.emb_similarity !== undefined && ` · embedding ${(doc.emb_similarity * 100).toFixed(1)}%`}
+                                    {' · '}{language === 'zh' ? '相似度' : 'score'} {(doc.max_similarity * 100).toFixed(1)}%
                                     {doc.created_at && ` · ${new Date(doc.created_at).toLocaleDateString()}`}
                                   </span>
                                 </div>
-                                {duplicateKeep[gi] === doc.id
-                                  ? <span className="text-xs text-green-600 font-medium shrink-0">{language === 'zh' ? '保留' : 'Keep'}</span>
-                                  : <button
-                                      className="text-xs text-red-500 hover:text-red-700 hover:underline shrink-0 font-medium"
-                                      onClick={async (e) => {
-                                        e.preventDefault();
-                                        try {
-                                          await deleteDocument(doc.id);
-                                          setDuplicateGroups(prev =>
-                                            prev
-                                              .map(g => g.filter((d: any) => d.id !== doc.id))
-                                              .filter(g => g.length >= 2)
-                                          );
-                                          await loadDocuments();
-                                          await loadDbStats();
-                                        } catch (err: any) {
-                                          setAdminMessage(`${t.msgError} ${err.response?.data?.detail || err.message}`);
-                                        }
-                                      }}
-                                    >
-                                      {language === 'zh' ? '删除' : 'Delete'}
-                                    </button>
-                                }
-                              </label>
+                                <button
+                                  className="text-xs text-red-500 hover:text-red-700 hover:underline shrink-0 font-medium"
+                                  onClick={async () => {
+                                    try {
+                                      await deleteDocument(doc.id);
+                                      setDuplicateGroups(prev =>
+                                        prev
+                                          .map(g => g.filter((d: any) => d.id !== doc.id))
+                                          .filter(g => g.length >= 2)
+                                      );
+                                      await loadDocuments();
+                                      await loadDbStats();
+                                    } catch (err: any) {
+                                      setAdminMessage(`${t.msgError} ${err.response?.data?.detail || err.message}`);
+                                    }
+                                  }}
+                                >
+                                  {language === 'zh' ? '删除' : 'Delete'}
+                                </button>
+                              </div>
                             ))}
                           </div>
                         </div>
                       ))}
-                      <button
-                        onClick={handleDeleteDuplicates}
-                        className="px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors text-sm font-medium"
-                      >
-                        {language === 'zh'
-                          ? `删除未选中的 ${duplicateGroups.reduce((n, g, gi) => n + g.filter((d: any) => d.id !== duplicateKeep[gi]).length, 0)} 个冗余文档`
-                          : `Delete ${duplicateGroups.reduce((n, g, gi) => n + g.filter((d: any) => d.id !== duplicateKeep[gi]).length, 0)} duplicate documents`
-                        }
-                      </button>
                     </div>
                   )}
                 </div>
@@ -1162,7 +1102,7 @@ function App() {
                                 🌳
                               </span>
                               <div className="min-w-0">
-                                <p className="text-gray-800 text-sm truncate">
+                                <p className="text-gray-800 text-sm truncate" title={doc.title}>
                                   {idx >= 0 ? (
                                     <>
                                       {title.slice(0, idx)}
@@ -1187,6 +1127,12 @@ function App() {
                   );
                 })()}
               </div>
+
+              {docsMessage && (
+                <div className={`text-sm px-4 py-3 rounded-xl whitespace-pre-wrap ${docsMessage.includes('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  {docsMessage}
+                </div>
+              )}
                 </div>
               )}
 

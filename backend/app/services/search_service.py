@@ -92,21 +92,19 @@ class SearchService:
 
     @staticmethod
     def search_multi_query(db: Session, queries: List[str], top_k: int = 10) -> List[Tuple[Chunk, float]]:
-        """多查询检索：对每个查询分别检索，然后合并结果（用于对比类查询）"""
-        all_results = {}
+        """多查询检索：对每个查询分别检索，每个实体独立分配 slot，避免弱实体被强实体挤占"""
+        per_entity_k = max(top_k, 10)  # 每个实体至少取 10 个
+        seen_ids: set = set()
+        merged: List[Tuple[Chunk, float]] = []
 
         for query in queries:
-            results = SearchService.search(db, query, top_k=top_k)
+            results = SearchService.search(db, query, top_k=per_entity_k)
             for chunk, score in results:
-                if chunk.id in all_results:
-                    # 如果已存在，取最高分
-                    all_results[chunk.id] = (chunk, max(all_results[chunk.id][1], score))
-                else:
-                    all_results[chunk.id] = (chunk, score)
+                if chunk.id not in seen_ids:
+                    seen_ids.add(chunk.id)
+                    merged.append((chunk, score))
 
-        # 按分数排序
-        sorted_results = sorted(all_results.values(), key=lambda x: x[1], reverse=True)
-        return sorted_results[:top_k * 2]  # 返回更多结果
+        return merged
 
     @staticmethod
     def invalidate_cache():

@@ -44,6 +44,13 @@ async def remove_original_doc_path(path: str):
 @router.get("/stats")
 async def get_stats(db: Session = Depends(get_db)):
     """获取数据库统计信息"""
+    # 清理死元组，确保 pg_database_size 准确
+    try:
+        db.execute(text("VACUUM chunks, documents"))
+        db.commit()
+    except Exception:
+        pass
+
     doc_count = db.query(func.count(Document.id)).scalar()
     chunk_count = db.query(func.count(Chunk.id)).scalar()
 
@@ -217,6 +224,9 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
     # 删除 chunks 和 document
     db.query(Chunk).filter(Chunk.document_id == document_id).delete()
     db.delete(document)
+    db.commit()
+    # 回收死元组占用的空间，使 pg_database_size 及时反映变化
+    db.execute(text("VACUUM chunks, documents"))
     db.commit()
     SearchService.invalidate_cache()
 

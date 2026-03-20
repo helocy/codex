@@ -107,6 +107,21 @@ async def rag_chat(
             results = SearchService.search(db, request.query, top_k=request.top_k)
         t_search = _elapsed("search/tree_index", t_search)
 
+        # 如果 query 中提到了特定芯片/产品型号，将匹配文档的 chunk 提到最前面
+        # 避免文档数量多的型号淹没文档少的目标型号
+        chip_pattern = re.compile(r'[A-Z]{2,}[0-9]+[A-Z0-9]*', re.IGNORECASE)
+        queried_models = chip_pattern.findall(request.query)
+        if queried_models and results:
+            from app.models.document import Document as _Doc
+            result_doc_ids = list({c.document_id for c, _ in results})
+            doc_titles = {d.id: d.title for d in db.query(_Doc).filter(_Doc.id.in_(result_doc_ids)).all()}
+            def _matches_model(doc_id: int) -> bool:
+                title = doc_titles.get(doc_id, '').upper()
+                return any(m.upper() in title for m in queried_models)
+            matched = [(c, s) for c, s in results if _matches_model(c.document_id)]
+            others = [(c, s) for c, s in results if not _matches_model(c.document_id)]
+            results = matched + others
+
         # 如果开启了网络搜索，同时搜索网络
         if request.use_web_search:
             web_results = web_search_service.search(request.query, num_results=5)

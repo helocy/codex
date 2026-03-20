@@ -219,6 +219,10 @@ function App() {
 
   const handleResend = (content: string) => {
     setQuery(content);
+    setTimeout(() => {
+      const form = document.querySelector<HTMLFormElement>('form[data-chat-form]');
+      if (form) form.requestSubmit();
+    }, 0);
   };
 
   const handleDeleteDocument = (doc: any) => {
@@ -1290,7 +1294,7 @@ function App() {
       {mode !== 'config' && mode !== 'memory' && (
         <div className="fixed bottom-0 left-0 right-0 bg-gray-50/95 backdrop-blur border-t border-gray-200 p-4">
           <div className="max-w-4xl mx-auto">
-            <form onSubmit={getSubmitHandler()}>
+            <form onSubmit={getSubmitHandler()} data-chat-form>
               <div className="bg-white rounded-2xl border-2 border-gray-200 focus-within:border-gray-400 transition-colors">
                 <input
                   type="text"

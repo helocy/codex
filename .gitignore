@@ -54,6 +54,9 @@ uploads/
 # Auto-generated knowledge cache (code analysis results)
 backend/knowledge/
 
+# Runtime config (may contain API keys)
+backend/config/*.json
+
 # Database
 *.db
 *.sqlite

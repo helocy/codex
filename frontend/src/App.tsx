@@ -177,9 +177,10 @@ function App() {
     loadDocuments();
   }, []);
 
-  // 仅管理员在启动时自动同步 LLM 配置到服务端
+  // 管理员登录时：关闭用户设置弹窗 + 同步 LLM 配置到服务端
   useEffect(() => {
     if (!isAdmin) return;
+    setShowUserSettings(false);
     const savedConfig = localStorage.getItem('llm_config');
     if (savedConfig) {
       try {
@@ -756,7 +757,7 @@ function App() {
       )}
 
       {/* User Settings Modal (non-admin personal LLM config) */}
-      {showUserSettings && (
+      {showUserSettings && !isAdmin && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <div className="flex items-center justify-between mb-6">

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates, configureCodeAnalysisLLM, getCodeAnalysisLLMConfig } from './services/api';
+import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates, configureCodeAnalysisLLM, getCodeAnalysisLLMConfig, listUsers, createUser, deleteUser } from './services/api';
 import MarkdownRenderer, { SimpleCodeRenderer } from './components/MarkdownRenderer';
 import { useTranslation } from './i18n/useTranslation';
+import { useAuth } from './context/AuthContext';
+import LoginPage from './pages/LoginPage';
 import './index.css';
 
-type Mode = 'memory' | 'chat' | 'config';
+type Mode = 'memory' | 'chat' | 'config' | 'users';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -85,6 +87,13 @@ function parseThinking(content: string): { thinking: string | null; answer: stri
 
 function App() {
   const { t, language, switchLanguage } = useTranslation();
+  const { user, isAdmin, logout } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<'user' | 'admin'>('user');
+  const [usersMessage, setUsersMessage] = useState('');
   const [mode, setMode] = useState<Mode>('chat');  // 默认显示对话界面
   const [query, setQuery] = useState('');
   const [textContent, setTextContent] = useState('');  // 记忆页面的文本输入
@@ -166,7 +175,8 @@ function App() {
 
   useEffect(() => {
     if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
-  }, [mode]);
+    if (mode === 'users' && isAdmin) { loadUsers(); }
+  }, [mode, isAdmin]);
 
   useEffect(() => {
     if (chatting) {
@@ -195,6 +205,10 @@ function App() {
 
   const loadDocuments = async () => {
     try { const d = await getDocuments(); setDocuments(d.documents || []); } catch {}
+  };
+
+  const loadUsers = async () => {
+    try { setUsersList(await listUsers()); } catch {}
   };
 
   const loadDbStats = async () => {
@@ -590,8 +604,9 @@ function App() {
     text: t.fileTypeText, audio: t.fileTypeAudio, image: t.fileTypeImage, video: t.fileTypeVideo,
   };
 
-  const modeLabels: Record<Mode, string> = {
+  const modeLabels: Record<string, string> = {
     chat: t.modeChat, memory: t.modeMemory, config: t.modeConfig,
+    ...(isAdmin ? { users: language === 'zh' ? '用户管理' : 'Users' } : {}),
   };
 
   const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -629,6 +644,9 @@ function App() {
         </div>
       )}
 
+      {/* Login Modal */}
+      {showLogin && <LoginPage onClose={() => setShowLogin(false)} />}
+
       {/* Confirm Dialog */}
       {confirm.visible && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -647,10 +665,26 @@ function App() {
 
       {/* ===== Header (only title + tabs) ===== */}
       <header className="flex flex-col items-center pt-10 pb-0 px-8 shrink-0">
+        <div className="w-full max-w-4xl flex justify-end mb-2">
+          {user ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">
+                {user.username}{user.role === 'admin' && <span className="ml-1 text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">admin</span>}
+              </span>
+              <button onClick={logout} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg">
+                {language === 'zh' ? '退出' : 'Logout'}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowLogin(true)} className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+              {language === 'zh' ? '登录' : 'Login'}
+            </button>
+          )}
+        </div>
         <h1 className="text-5xl font-bold text-gray-900 mb-8">{t.appName}</h1>
         <div className="flex gap-3 flex-wrap justify-center">
           {(Object.keys(modeLabels) as Mode[]).map((m) => (
-            <button key={m} onClick={() => setMode(m)}
+            <button key={m} onClick={() => setMode(m as Mode)}
               className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${mode === m ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>
               {modeLabels[m]}
             </button>
@@ -1248,7 +1282,7 @@ function App() {
                   {docSearch && (
                     <button onClick={() => setDocSearch('')} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">{t.actionClear}</button>
                   )}
-                  {isLocalhost && documents.length > 0 && (
+                  {(isLocalhost || isAdmin) && documents.length > 0 && (
                     <button
                       onClick={handleBatchBuildTreeIndex}
                       disabled={batchBuilding}
@@ -1305,7 +1339,7 @@ function App() {
                                 <p className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleString()}</p>
                               </div>
                             </div>
-                            {isLocalhost && (
+                            {(isLocalhost || isAdmin) && (
                               <button onClick={() => handleDeleteDocument(doc)}
                                 className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
                                 {t.actionDelete}
@@ -1330,10 +1364,76 @@ function App() {
             </div>
           )}
 
+          {/* Users Mode (admin only) */}
+          {mode === 'users' && isAdmin && (
+            <div className="w-full max-w-2xl space-y-6">
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">{language === 'zh' ? '创建用户' : 'Create User'}</h3>
+                <div className="space-y-3">
+                  <input type="text" value={newUsername} onChange={e => setNewUsername(e.target.value)}
+                    placeholder={language === 'zh' ? '用户名' : 'Username'}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                  <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                    placeholder={language === 'zh' ? '密码' : 'Password'}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                  <select value={newRole} onChange={e => setNewRole(e.target.value as 'user' | 'admin')}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400">
+                    <option value="user">{language === 'zh' ? '普通用户' : 'User'}</option>
+                    <option value="admin">{language === 'zh' ? '管理员' : 'Admin'}</option>
+                  </select>
+                  <button
+                    onClick={async () => {
+                      if (!newUsername.trim() || !newPassword.trim()) return;
+                      try {
+                        await createUser(newUsername.trim(), newPassword, newRole);
+                        setUsersMessage(language === 'zh' ? '用户创建成功' : 'User created');
+                        setNewUsername(''); setNewPassword(''); setNewRole('user');
+                        loadUsers();
+                      } catch (e: any) { setUsersMessage(e.response?.data?.detail || e.message); }
+                    }}
+                    disabled={!newUsername.trim() || !newPassword.trim()}
+                    className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    {language === 'zh' ? '创建' : 'Create'}
+                  </button>
+                  {usersMessage && <p className="text-sm text-gray-600">{usersMessage}</p>}
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">{language === 'zh' ? '用户列表' : 'User List'}</h3>
+                <div className="space-y-2">
+                  {usersList.map((u: any) => (
+                    <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div>
+                        <span className="text-sm font-medium text-gray-800">{u.username}</span>
+                        <span className="ml-2 text-xs text-gray-400">{u.role}</span>
+                      </div>
+                      <button
+                        onClick={() => showConfirm(
+                          language === 'zh' ? '删除用户' : 'Delete User',
+                          language === 'zh' ? `确认删除用户 "${u.username}"？` : `Delete user "${u.username}"?`,
+                          async () => {
+                            setConfirm(p => ({ ...p, visible: false }));
+                            try { await deleteUser(u.id); loadUsers(); } catch (e: any) { setUsersMessage(e.response?.data?.detail || e.message); }
+                          }
+                        )}
+                        className="text-xs text-red-500 border border-red-200 px-2 py-1 rounded hover:bg-red-50"
+                      >
+                        {language === 'zh' ? '删除' : 'Delete'}
+                      </button>
+                    </div>
+                  ))}
+                  {usersList.length === 0 && <p className="text-sm text-gray-400">{language === 'zh' ? '暂无用户' : 'No users'}</p>}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Codex Mode */}
           {mode === 'memory' && (
             <div className="w-full max-w-4xl space-y-6">
               {/* 文本输入区域 */}
+              {(isLocalhost || isAdmin) && (
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-1">{t.memoryTextInput}</h3>
                 <p className="text-xs text-gray-400 mb-3">{t.memoryTextInputDesc}</p>
@@ -1365,7 +1465,9 @@ function App() {
                   </div>
                 </form>
               </div>
+              )}
 
+              {(isLocalhost || isAdmin) && (
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-1">{t.memoryUploadTitle}</h3>
                 <p className="text-xs text-gray-400 mb-5">{t.memoryUploadDesc}</p>
@@ -1416,6 +1518,7 @@ function App() {
                   </button>
                 </div>
               </div>
+              )}
 
               {(uploading || uploadDone) && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">

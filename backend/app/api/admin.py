@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from app.core.database import get_db
+from app.core.deps import require_admin
+from app.models.user import User
 from app.models.document import Document, Chunk
 from app.services.embedding_service import embedding_service
 from app.services.original_doc_service import original_doc_service
@@ -12,7 +14,7 @@ import json
 import io
 from datetime import datetime
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 # ========== 原始文档路径管理 ==========

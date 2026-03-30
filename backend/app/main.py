@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
-from app.api import documents, search, chat, admin, embedding, api_
+from app.api import documents, search, chat, admin, embedding, api_, auth
 from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,25 @@ def _warmup_cache():
         print(f"[Warmup] 预热失败: {e}", flush=True)
 
 
+def _ensure_admin():
+    """若 ADMIN_PASSWORD 非空且无 admin 用户，自动创建管理员"""
+    if not settings.ADMIN_PASSWORD:
+        return
+    try:
+        from app.models.user import User
+        from app.api.auth import create_user
+        db = SessionLocal()
+        if not db.query(User).filter(User.role == "admin").first():
+            create_user(db, settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD, role="admin")
+            print(f"[Auth] 已自动创建管理员账号: {settings.ADMIN_USERNAME}", flush=True)
+        db.close()
+    except Exception as e:
+        print(f"[Auth] 管理员创建失败: {e}", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _ensure_admin()
     threading.Thread(target=_warmup_cache, daemon=True).start()
     yield
 
@@ -76,6 +93,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(documents.router, prefix=f"{settings.API_V1_STR}/documents", tags=["documents"])
 app.include_router(search.router, prefix=f"{settings.API_V1_STR}/search", tags=["search"])
 app.include_router(chat.router, prefix=f"{settings.API_V1_STR}/chat", tags=["chat"])

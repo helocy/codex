@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.core.database import get_db, SessionLocal
 from app.core.config import settings
+from app.core.deps import require_admin
 from app.models.document import Document, FileType, Chunk
 from app.services.file_processor import FileProcessor
 from app.services.embedding_service import embedding_service
@@ -31,7 +32,8 @@ async def save_text(
     overwrite: bool = False,       # 是否覆盖同名文档
     check_similar: bool = True,    # 是否检查相似文档
     background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin)
 ):
     """保存纯文本内容
 
@@ -179,7 +181,8 @@ async def upload_file(
     overwrite: bool = False,       # 是否覆盖同名文档
     check_similar: bool = True,    # 是否检查相似文档
     background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin)
 ):
     """上传文件并处理"""
     try:
@@ -533,7 +536,8 @@ async def list_documents(db: Session = Depends(get_db)):
 @router.post("/batch-build-tree-index")
 async def batch_build_tree_index(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin)
 ):
     """为所有没有树形索引的文档批量触发 PageIndex 构建（后台异步执行）"""
     docs_without_index = db.query(Document).filter(Document.tree_index == None).all()
@@ -551,7 +555,8 @@ async def batch_build_tree_index(
 async def build_document_tree_index(
     document_id: int,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin)
 ):
     """手动触发为指定文档重建 PageIndex 树形索引"""
     document = db.query(Document).filter(Document.id == document_id).first()

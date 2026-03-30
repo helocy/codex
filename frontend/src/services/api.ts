@@ -9,6 +9,27 @@ export const api = axios.create({
   },
 });
 
+// 请求拦截器：有 token 时自动附加 Authorization 头
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('codex_token');
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers['Authorization'] = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// 响应拦截器：401 时清除 token
+api.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('codex_token');
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const uploadFile = async (file: File, skipDuplicate: boolean = false, overwrite: boolean = false) => {
   const formData = new FormData();
   formData.append('file', file);
@@ -191,4 +212,28 @@ export const addOriginalDocPath = async (path: string) => {
 export const removeOriginalDocPath = async (path: string) => {
   const response = await api.delete('/admin/original-doc-paths', { params: { path } });
   return response.data;
+};
+
+export const authLogin = async (username: string, password: string) => {
+  const response = await api.post('/auth/login', { username, password });
+  return response.data;
+};
+
+export const authMe = async () => {
+  const response = await api.get('/auth/me');
+  return response.data;
+};
+
+export const listUsers = async () => {
+  const response = await api.get('/auth/users');
+  return response.data;
+};
+
+export const createUser = async (username: string, password: string, role: string = 'user') => {
+  const response = await api.post('/auth/users', { username, password, role });
+  return response.data;
+};
+
+export const deleteUser = async (id: number) => {
+  await api.delete(`/auth/users/${id}`);
 };

@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     CODE_ANALYSIS_BASE_URL: Optional[str] = None        # Anthropic API URL，留空使用默认
     CODE_ANALYSIS_MODEL: Optional[str] = "claude-sonnet-4-6"
 
+    # 认证
+    SECRET_KEY: str = "change-me-in-production"
+    ACCESS_TOKEN_EXPIRE_DAYS: int = 7
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = ""
+
     # CORS
     BACKEND_CORS_ORIGINS: list = ["*"]
 

@@ -97,6 +97,7 @@ function App() {
   const [usersMessage, setUsersMessage] = useState('');
   const [accountNewUsername, setAccountNewUsername] = useState('');
   const [accountNewPassword, setAccountNewPassword] = useState('');
+  const [accountConfirmPassword, setAccountConfirmPassword] = useState('');
   const [accountCurrentPassword, setAccountCurrentPassword] = useState('');
   const [accountMessage, setAccountMessage] = useState('');
   const [mode, setMode] = useState<Mode>('chat');  // 默认显示对话界面
@@ -1567,22 +1568,31 @@ function App() {
                       placeholder={language === 'zh' ? '当前密码' : 'Current password'}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
                   </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '新登录名（留空不修改）' : 'New username (optional)'}</label>
+                    <input type="text" value={accountNewUsername} onChange={e => setAccountNewUsername(e.target.value)}
+                      placeholder={language === 'zh' ? '新用户名' : 'New username'}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '新登录名（留空不修改）' : 'New username (optional)'}</label>
-                      <input type="text" value={accountNewUsername} onChange={e => setAccountNewUsername(e.target.value)}
-                        placeholder={language === 'zh' ? '新用户名' : 'New username'}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
-                    </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '新密码（留空不修改）' : 'New password (optional)'}</label>
                       <input type="password" value={accountNewPassword} onChange={e => setAccountNewPassword(e.target.value)}
                         placeholder={language === 'zh' ? '新密码' : 'New password'}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 ${accountNewPassword && accountConfirmPassword && accountNewPassword !== accountConfirmPassword ? 'border-red-300' : 'border-gray-200'}`} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '确认新密码' : 'Confirm new password'}</label>
+                      <input type="password" value={accountConfirmPassword} onChange={e => setAccountConfirmPassword(e.target.value)}
+                        placeholder={language === 'zh' ? '再次输入新密码' : 'Repeat new password'}
+                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400 ${accountNewPassword && accountConfirmPassword && accountNewPassword !== accountConfirmPassword ? 'border-red-300' : 'border-gray-200'}`} />
                     </div>
                   </div>
+                  {accountNewPassword && accountConfirmPassword && accountNewPassword !== accountConfirmPassword && (
+                    <p className="text-xs text-red-500">{language === 'zh' ? '两次密码不一致' : 'Passwords do not match'}</p>
+                  )}
                   <button
-                    disabled={!accountCurrentPassword.trim() || (!accountNewUsername.trim() && !accountNewPassword.trim())}
+                    disabled={!accountCurrentPassword.trim() || (!accountNewUsername.trim() && !accountNewPassword.trim()) || (!!accountNewPassword && accountNewPassword !== accountConfirmPassword)}
                     onClick={async () => {
                       if (!user) return;
                       setAccountMessage('');
@@ -1597,7 +1607,7 @@ function App() {
                           msgs.push(language === 'zh' ? '密码已更新' : 'Password updated');
                         }
                         setAccountMessage('✓ ' + msgs.join('，'));
-                        setAccountCurrentPassword(''); setAccountNewUsername(''); setAccountNewPassword('');
+                        setAccountCurrentPassword(''); setAccountNewUsername(''); setAccountNewPassword(''); setAccountConfirmPassword('');
                         if (accountNewUsername.trim()) {
                           // 用户名变了，需要重新登录
                           setTimeout(() => { logout(); }, 1500);

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from app.services.embedding_service import embedding_service
 
 router = APIRouter()
@@ -11,6 +11,22 @@ class EmbeddingConfigRequest(BaseModel):
     model: str
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+
+
+class EncodeRequest(BaseModel):
+    texts: List[str]
+
+
+@router.post("/encode")
+async def encode_texts(request: EncodeRequest):
+    """计算文本向量（不存储，供前端本地文档检索使用）"""
+    try:
+        if not request.texts:
+            return {"embeddings": []}
+        embeddings = embedding_service.encode(request.texts)
+        return {"embeddings": [e.tolist() for e in embeddings]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/config")

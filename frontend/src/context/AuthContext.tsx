@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { api } from '../services/api';
 
 interface AuthUser {
+  id: number;
   username: string;
   role: string;
 }
@@ -38,16 +39,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!token) return;
     api.get('/auth/me')
-      .then(r => setUser({ username: r.data.username, role: r.data.role }))
+      .then(r => setUser({ id: r.data.id, username: r.data.username, role: r.data.role }))
       .catch(() => logout());
   }, [token, logout]);
 
   const login = useCallback(async (username: string, password: string) => {
     const r = await api.post('/auth/login', { username, password });
-    const { access_token, username: uname, role } = r.data;
+    const { access_token, id, username: uname, role } = r.data;
     localStorage.setItem(TOKEN_KEY, access_token);
     setToken(access_token);
-    setUser({ username: uname, role });
+    setUser({ id, username: uname, role });
   }, []);
 
   return (

@@ -477,6 +477,46 @@ def generate_sse_events(directory_path: str, db: Session, skip_duplicate: bool =
         yield json.dumps({"type": "error", "message": f"发生错误: {str(e)}"}) + "\n"
 
 
+@router.post("/extract")
+async def extract_file_text(
+    file: UploadFile = File(...),
+):
+    """提取文件文本内容（不存储，仅返回文本，用于前端本地文档处理）"""
+    try:
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in {'.txt', '.md', '.pdf', '.docx', '.doc'}:
+            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {file_ext}")
+
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        import tempfile
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=file_ext,
+            dir=settings.UPLOAD_DIR
+        ) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        try:
+            if file_ext == '.pdf':
+                text = FileProcessor.extract_text_from_pdf(tmp_path)
+            elif file_ext in ('.docx', '.doc'):
+                text = FileProcessor.extract_text_from_docx(tmp_path)
+            elif file_ext == '.md':
+                text = FileProcessor.extract_text_from_markdown(tmp_path)
+            else:
+                with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
+                    text = f.read()
+        finally:
+            os.remove(tmp_path)
+
+        return {"text": text, "filename": file.filename}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/upload-directory")
 async def upload_directory_sse(
     directory_path: str,

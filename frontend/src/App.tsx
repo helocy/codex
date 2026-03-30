@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates, configureCodeAnalysisLLM, getCodeAnalysisLLMConfig, listUsers, createUser, deleteUser } from './services/api';
+import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates, configureCodeAnalysisLLM, getCodeAnalysisLLMConfig, listUsers, createUser, deleteUser, embedTexts, extractFileText, changePassword, changeUsername } from './services/api';
+import { saveLocalDoc, listLocalDocs, deleteLocalDoc, searchLocalDocs, chunkText } from './db/localDb';
 import MarkdownRenderer, { SimpleCodeRenderer } from './components/MarkdownRenderer';
 import { useTranslation } from './i18n/useTranslation';
 import { useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import './index.css';
 
-type Mode = 'memory' | 'chat' | 'config' | 'users';
+type Mode = 'memory' | 'chat' | 'config' | 'users' | 'myDocs';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -94,6 +95,10 @@ function App() {
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'user' | 'admin'>('user');
   const [usersMessage, setUsersMessage] = useState('');
+  const [accountNewUsername, setAccountNewUsername] = useState('');
+  const [accountNewPassword, setAccountNewPassword] = useState('');
+  const [accountCurrentPassword, setAccountCurrentPassword] = useState('');
+  const [accountMessage, setAccountMessage] = useState('');
   const [mode, setMode] = useState<Mode>('chat');  // 默认显示对话界面
   const [query, setQuery] = useState('');
   const [textContent, setTextContent] = useState('');  // 记忆页面的文本输入
@@ -150,6 +155,15 @@ function App() {
   const [docsMessage, setDocsMessage] = useState('');
   const [configTab, setConfigTab] = useState<'model' | 'database' | 'docs'>('model');
 
+  // 本地文档（存储在浏览器 IndexedDB，不上传服务端）
+  const [localDocs, setLocalDocs] = useState<any[]>([]);
+  const [localUploading, setLocalUploading] = useState(false);
+  const [localMessage, setLocalMessage] = useState('');
+
+  // 用户设置弹窗（非管理员的个人 LLM 配置）
+  const [showUserSettings, setShowUserSettings] = useState(false);
+  const [userSettingsMessage, setUserSettingsMessage] = useState('');
+
   // 自动滚到底部
   useEffect(() => {
     if (chatEndRef.current) {
@@ -161,21 +175,26 @@ function App() {
     loadLLMConfig();
     loadEmbeddingConfig();
     loadDocuments();
+  }, []);
+
+  // 仅管理员在启动时自动同步 LLM 配置到服务端
+  useEffect(() => {
+    if (!isAdmin) return;
     const savedConfig = localStorage.getItem('llm_config');
     if (savedConfig) {
       try {
         const config = JSON.parse(savedConfig);
-        // 只有当配置了 API Key 时才自动配置
         if (config.api_key && config.api_key.trim()) {
           configureLLM(config).catch(console.error);
         }
       } catch {}
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
     if (mode === 'users' && isAdmin) { loadUsers(); }
+    if (mode === 'myDocs') { loadLocalDocs(); }
   }, [mode, isAdmin]);
 
   useEffect(() => {
@@ -214,6 +233,64 @@ function App() {
   const loadDbStats = async () => {
     setStatsLoading(true);
     try { setDbStats(await getDbStats()); } catch {} finally { setStatsLoading(false); }
+  };
+
+  const loadLocalDocs = async () => {
+    try { setLocalDocs(await listLocalDocs()); } catch {}
+  };
+
+  const handleLocalFileUpload = async (file: File) => {
+    setLocalUploading(true);
+    setLocalMessage('');
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      let text = '';
+      if (ext === 'txt' || ext === 'md') {
+        text = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || '');
+          reader.onerror = reject;
+          reader.readAsText(file, 'utf-8');
+        });
+      } else {
+        text = await extractFileText(file);
+      }
+      if (!text.trim()) {
+        setLocalMessage(language === 'zh' ? '✗ 无法提取文本内容' : '✗ Failed to extract text');
+        return;
+      }
+      const chunks = chunkText(text);
+      const embeddings = await embedTexts(chunks);
+      await saveLocalDoc({
+        id: crypto.randomUUID(),
+        title: file.name,
+        fileType: ext || 'text',
+        fileSize: file.size,
+        createdAt: new Date().toISOString(),
+        chunkCount: chunks.length,
+        chunks: chunks.map((t, i) => ({ text: t, embedding: embeddings[i], index: i })),
+      });
+      setLocalMessage(language === 'zh'
+        ? `✓ 已保存 "${file.name}"（${chunks.length} 个文本块）`
+        : `✓ Saved "${file.name}" (${chunks.length} chunks)`);
+      loadLocalDocs();
+    } catch (e: any) {
+      setLocalMessage(`✗ ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setLocalUploading(false);
+    }
+  };
+
+  const handleDeleteLocalDoc = async (id: string, title: string) => {
+    showConfirm(
+      language === 'zh' ? '删除本地文档' : 'Delete local document',
+      language === 'zh' ? `确认删除 "${title}"？此操作无法撤销。` : `Delete "${title}"? This cannot be undone.`,
+      async () => {
+        setConfirm(p => ({ ...p, visible: false }));
+        await deleteLocalDoc(id);
+        loadLocalDocs();
+      }
+    );
   };
 
   const loadOriginalDocPaths = async () => {
@@ -406,7 +483,32 @@ function App() {
       ? chatMessages.slice(-(historyTurns * 2)).map(m => ({ role: m.role, content: m.content }))
       : [];
     try {
-      const r = await chatWithRAG(userMessage.content, 20, useRag, useWebSearch, useOriginalDoc, history, true, controller.signal, useCodeAnalysis);
+      // 搜索用户本地文档
+      let localContext: string[] | undefined;
+      if (useRag && user) {
+        try {
+          const [queryEmb] = await embedTexts([userMessage.content]);
+          const localResults = await searchLocalDocs(queryEmb, 5);
+          if (localResults.length > 0) localContext = localResults;
+        } catch {}
+      }
+
+      // 非管理员使用个人 LLM 配置
+      const savedCfg = localStorage.getItem('llm_config');
+      let userLlmConfig: typeof llmConfig | undefined;
+      if (!isAdmin && savedCfg) {
+        try {
+          const cfg = JSON.parse(savedCfg);
+          if (cfg.api_key?.trim()) userLlmConfig = cfg;
+        } catch {}
+      }
+
+      const r = await chatWithRAG(
+        userMessage.content, 20, useRag, useWebSearch, useOriginalDoc,
+        history, true, controller.signal, useCodeAnalysis,
+        localContext,
+        userLlmConfig,
+      );
       const elapsed = (Date.now() - t0) / 1000;
       setChatMessages(prev => [...prev, {
         role: 'assistant',
@@ -570,12 +672,19 @@ function App() {
   };
 
   const handleSaveLLMConfig = async () => {
-    try {
-      await configureLLM(llmConfig);
+    if (isAdmin) {
+      try {
+        await configureLLM(llmConfig);
+        localStorage.setItem('llm_config', JSON.stringify(llmConfig));
+        setMessage(`${t.msgSuccess} ${t.msgConfigSuccess}`);
+        setTimeout(() => setMessage(''), 3000);
+      } catch (e: any) { setMessage(`${t.msgError} ${language === 'zh' ? '配置失败' : 'Configuration failed'}: ${e.response?.data?.detail || e.message}`); }
+    } else {
+      // 普通用户：仅保存到 localStorage，作为个人 LLM 配置
       localStorage.setItem('llm_config', JSON.stringify(llmConfig));
-      setMessage(`${t.msgSuccess} ${t.msgConfigSuccess}`);
-      setTimeout(() => setMessage(''), 3000);
-    } catch (e: any) { setMessage(`${t.msgError} ${language === 'zh' ? '配置失败' : 'Configuration failed'}: ${e.response?.data?.detail || e.message}`); }
+      setUserSettingsMessage(language === 'zh' ? '✓ 配置已保存' : '✓ Config saved');
+      setTimeout(() => setUserSettingsMessage(''), 3000);
+    }
   };
 
   const handleSaveCodeAnalysisConfig = async () => {
@@ -596,6 +705,7 @@ function App() {
 
   const getSubmitHandler = () => {
     if (mode === 'chat') return handleChat;
+    if (mode === 'myDocs') return (e: React.FormEvent) => e.preventDefault();
     return handleTextSubmit;
   };
 
@@ -605,7 +715,9 @@ function App() {
   };
 
   const modeLabels: Record<string, string> = {
-    chat: t.modeChat, memory: t.modeMemory,
+    chat: t.modeChat,
+    myDocs: language === 'zh' ? '我的文档' : 'My Docs',
+    ...(isAdmin ? { memory: t.modeMemory } : {}),
     ...(isAdmin ? { config: t.modeConfig } : {}),
     ...(isAdmin ? { users: language === 'zh' ? '用户管理' : 'Users' } : {}),
   };
@@ -643,6 +755,51 @@ function App() {
         </div>
       )}
 
+      {/* User Settings Modal (non-admin personal LLM config) */}
+      {showUserSettings && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900">{language === 'zh' ? '个人对话模型配置' : 'Personal LLM Config'}</h3>
+              <button onClick={() => setShowUserSettings(false)} className="text-gray-400 hover:text-gray-600">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mb-5">
+              {language === 'zh'
+                ? '配置你自己的大模型，仅存储在本地浏览器，不上传服务器。对话时优先使用此配置。'
+                : 'Configure your own LLM. Stored locally in your browser only. Used for all your conversations.'}
+            </p>
+            <div className="space-y-4">
+              {[
+                { label: language === 'zh' ? '接口地址 (Base URL)' : 'Base URL', key: 'base_url', type: 'text', placeholder: 'e.g. https://ark.cn-beijing.volces.com/api/v3' },
+                { label: 'API Key', key: 'api_key', type: 'password', placeholder: 'sk-...' },
+                { label: language === 'zh' ? '模型名称' : 'Model', key: 'model', type: 'text', placeholder: 'e.g. doubao-pro-4k, gpt-4o, qwen-plus' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">{f.label}</label>
+                  <input type={f.type} value={(llmConfig as any)[f.key] || ''}
+                    onChange={(e) => setLlmConfig({ ...llmConfig, [f.key]: e.target.value })}
+                    placeholder={f.placeholder}
+                    className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none text-sm" />
+                </div>
+              ))}
+              <button
+                onClick={handleSaveLLMConfig}
+                className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+              >
+                {language === 'zh' ? '保存配置' : 'Save Config'}
+              </button>
+              {userSettingsMessage && (
+                <div className={`text-sm text-center ${userSettingsMessage.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>
+                  {userSettingsMessage}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Login Modal */}
       {showLogin && <LoginPage onClose={() => setShowLogin(false)} />}
 
@@ -670,14 +827,48 @@ function App() {
               <span className="text-sm text-gray-500">
                 {user.username}{user.role === 'admin' && <span className="ml-1 text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">admin</span>}
               </span>
+              {!isAdmin && (
+                <button
+                  onClick={() => setShowUserSettings(true)}
+                  title={language === 'zh' ? '个人设置' : 'Settings'}
+                  className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline' }}>
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                </button>
+              )}
+              <button
+                onClick={() => switchLanguage(language === 'zh' ? 'en' : 'zh')}
+                className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg hover:bg-gray-50"
+              >
+                {language === 'zh' ? 'EN' : '中文'}
+              </button>
               <button onClick={logout} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg">
                 {language === 'zh' ? '退出' : 'Logout'}
               </button>
             </div>
           ) : (
-            <button onClick={() => setShowLogin(true)} className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50">
-              {language === 'zh' ? '登录' : 'Login'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => switchLanguage(language === 'zh' ? 'en' : 'zh')}
+                className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg hover:bg-gray-50"
+              >
+                {language === 'zh' ? 'EN' : '中文'}
+              </button>
+              <button
+                onClick={() => setShowUserSettings(true)}
+                title={language === 'zh' ? '对话模型配置' : 'LLM Settings'}
+                className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline' }}>
+                  <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </button>
+              <button onClick={() => setShowLogin(true)} className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+                {language === 'zh' ? '管理员登录' : 'Admin Login'}
+              </button>
+            </div>
           )}
         </div>
         <h1 className="text-5xl font-bold text-gray-900 mb-8">{t.appName}</h1>
@@ -1366,6 +1557,66 @@ function App() {
           {/* Users Mode (admin only) */}
           {mode === 'users' && isAdmin && (
             <div className="w-full max-w-2xl space-y-6">
+
+              {/* 账号设置 */}
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">{language === 'zh' ? '我的账号' : 'My Account'}</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '当前密码（修改任何信息都需要验证）' : 'Current password (required for any change)'}</label>
+                    <input type="password" value={accountCurrentPassword} onChange={e => setAccountCurrentPassword(e.target.value)}
+                      placeholder={language === 'zh' ? '当前密码' : 'Current password'}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '新登录名（留空不修改）' : 'New username (optional)'}</label>
+                      <input type="text" value={accountNewUsername} onChange={e => setAccountNewUsername(e.target.value)}
+                        placeholder={language === 'zh' ? '新用户名' : 'New username'}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">{language === 'zh' ? '新密码（留空不修改）' : 'New password (optional)'}</label>
+                      <input type="password" value={accountNewPassword} onChange={e => setAccountNewPassword(e.target.value)}
+                        placeholder={language === 'zh' ? '新密码' : 'New password'}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-gray-400" />
+                    </div>
+                  </div>
+                  <button
+                    disabled={!accountCurrentPassword.trim() || (!accountNewUsername.trim() && !accountNewPassword.trim())}
+                    onClick={async () => {
+                      if (!user) return;
+                      setAccountMessage('');
+                      const msgs: string[] = [];
+                      try {
+                        if (accountNewUsername.trim()) {
+                          await changeUsername(user.id, accountNewUsername.trim(), accountCurrentPassword);
+                          msgs.push(language === 'zh' ? `登录名已改为 "${accountNewUsername.trim()}"` : `Username changed to "${accountNewUsername.trim()}"`);
+                        }
+                        if (accountNewPassword.trim()) {
+                          await changePassword(user.id, accountCurrentPassword, accountNewPassword.trim());
+                          msgs.push(language === 'zh' ? '密码已更新' : 'Password updated');
+                        }
+                        setAccountMessage('✓ ' + msgs.join('，'));
+                        setAccountCurrentPassword(''); setAccountNewUsername(''); setAccountNewPassword('');
+                        if (accountNewUsername.trim()) {
+                          // 用户名变了，需要重新登录
+                          setTimeout(() => { logout(); }, 1500);
+                        }
+                      } catch (e: any) {
+                        setAccountMessage('✗ ' + (e.response?.data?.detail || e.message));
+                      }
+                    }}
+                    className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {language === 'zh' ? '保存修改' : 'Save Changes'}
+                  </button>
+                  {accountMessage && (
+                    <p className={`text-sm ${accountMessage.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{accountMessage}</p>
+                  )}
+                </div>
+              </div>
+
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">{language === 'zh' ? '创建用户' : 'Create User'}</h3>
                 <div className="space-y-3">
@@ -1424,6 +1675,91 @@ function App() {
                   ))}
                   {usersList.length === 0 && <p className="text-sm text-gray-400">{language === 'zh' ? '暂无用户' : 'No users'}</p>}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* My Docs Mode */}
+          {mode === 'myDocs' && (
+            <div className="w-full max-w-3xl space-y-6">
+              <div className="bg-white rounded-2xl p-6 shadow-md">
+                <h3 className="text-lg font-bold text-gray-900 mb-1">
+                  {language === 'zh' ? '上传本地文档' : 'Upload Local Document'}
+                </h3>
+                <p className="text-xs text-gray-400 mb-4">
+                  {language === 'zh'
+                    ? '文档只存储在你的浏览器中，不会上传到服务器。对话时自动检索这些文档。支持 .txt、.md、.pdf、.docx。'
+                    : 'Documents are stored only in your browser, never sent to the server. Auto-searched during chat. Supports .txt, .md, .pdf, .docx.'}
+                </p>
+                <label className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors ${localUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  <span className="text-sm text-gray-600">
+                    {localUploading
+                      ? (language === 'zh' ? '处理中...' : 'Processing...')
+                      : (language === 'zh' ? '点击选择文件' : 'Click to select file')}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".txt,.md,.pdf,.docx,.doc"
+                    className="hidden"
+                    disabled={localUploading}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleLocalFileUpload(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {localMessage && (
+                  <div className={`mt-3 text-sm px-4 py-2 rounded-lg ${localMessage.includes('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    {localMessage}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-gray-900">
+                    {language === 'zh' ? `我的文档（${localDocs.length}）` : `My Documents (${localDocs.length})`}
+                  </h3>
+                  <button onClick={loadLocalDocs} className="text-xs text-gray-400 hover:text-gray-600">
+                    {language === 'zh' ? '刷新' : 'Refresh'}
+                  </button>
+                </div>
+                {localDocs.length === 0 ? (
+                  <div className="text-center text-gray-400 py-12 text-sm">
+                    {language === 'zh' ? '暂无本地文档' : 'No local documents yet'}
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                    {localDocs.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                            doc.fileType === 'md' ? 'bg-blue-100 text-blue-700' :
+                            doc.fileType === 'pdf' ? 'bg-red-100 text-red-700' :
+                            doc.fileType === 'docx' || doc.fileType === 'doc' ? 'bg-indigo-100 text-indigo-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {doc.fileType.toUpperCase()}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-gray-800 text-sm truncate" title={doc.title}>{doc.title}</p>
+                            <p className="text-xs text-gray-400">
+                              {doc.chunkCount} {language === 'zh' ? '个文本块' : 'chunks'} · {new Date(doc.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteLocalDoc(doc.id, doc.title)}
+                          className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                        >
+                          {language === 'zh' ? '删除' : 'Delete'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

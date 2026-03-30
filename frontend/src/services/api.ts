@@ -85,6 +85,8 @@ export const chatWithRAG = async (
   useTreeIndex: boolean = true,
   signal?: AbortSignal,
   useCodeAnalysis: boolean = false,
+  localContext?: string[],
+  userLlmConfig?: { provider: string; api_key?: string; base_url?: string; model?: string },
 ) => {
   const response = await api.post('/chat/chat', {
     query,
@@ -95,8 +97,24 @@ export const chatWithRAG = async (
     use_tree_index: useTreeIndex,
     use_code_analysis: useCodeAnalysis,
     history: history || [],
+    local_context: localContext,
+    user_llm_config: userLlmConfig,
   }, { signal });
   return response.data;
+};
+
+export const embedTexts = async (texts: string[]): Promise<number[][]> => {
+  const response = await api.post('/embedding/encode', { texts });
+  return response.data.embeddings;
+};
+
+export const extractFileText = async (file: File): Promise<string> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post('/documents/extract', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data.text as string;
 };
 
 export const configureLLM = async (config: {
@@ -236,4 +254,20 @@ export const createUser = async (username: string, password: string, role: strin
 
 export const deleteUser = async (id: number) => {
   await api.delete(`/auth/users/${id}`);
+};
+
+export const changePassword = async (userId: number, currentPassword: string, newPassword: string) => {
+  const response = await api.put(`/auth/users/${userId}/password`, {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+  return response.data;
+};
+
+export const changeUsername = async (userId: number, newUsername: string, currentPassword: string) => {
+  const response = await api.put(`/auth/users/${userId}/username`, {
+    new_username: newUsername,
+    current_password: currentPassword,
+  });
+  return response.data;
 };

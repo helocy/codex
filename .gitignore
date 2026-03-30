@@ -51,6 +51,9 @@ Thumbs.db
 uploads/
 *.log
 
+# Auto-generated knowledge cache (code analysis results)
+backend/knowledge/
+
 # Database
 *.db
 *.sqlite

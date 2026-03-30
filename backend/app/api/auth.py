@@ -26,7 +26,13 @@ class CreateUserRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
+    current_password: str
     new_password: str
+
+
+class ChangeUsernameRequest(BaseModel):
+    new_username: str
+    current_password: str
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -61,12 +67,12 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     token = create_access_token(user.username, user.role)
-    return {"access_token": token, "token_type": "bearer", "username": user.username, "role": user.role}
+    return {"access_token": token, "token_type": "bearer", "id": user.id, "username": user.username, "role": user.role}
 
 
 @router.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
-    return {"username": current_user.username, "role": current_user.role, "created_at": current_user.created_at}
+    return {"id": current_user.id, "username": current_user.username, "role": current_user.role, "created_at": current_user.created_at}
 
 
 @router.get("/users")
@@ -103,11 +109,40 @@ def change_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != "admin" and current_user.id != user_id:
+    if current_user.id != user_id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Forbidden")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    # 必须验证当前密码
+    if not verify_password(req.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="当前密码错误")
+    if not req.new_password.strip():
+        raise HTTPException(status_code=400, detail="新密码不能为空")
     user.hashed_password = hash_password(req.new_password)
     db.commit()
     return {"ok": True}
+
+
+@router.put("/users/{user_id}/username")
+def change_username(
+    user_id: int,
+    req: ChangeUsernameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.id != user_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(req.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="当前密码错误")
+    new_username = req.new_username.strip()
+    if not new_username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    if db.query(User).filter(User.username == new_username, User.id != user_id).first():
+        raise HTTPException(status_code=409, detail="用户名已被占用")
+    user.username = new_username
+    db.commit()
+    return {"ok": True, "username": new_username}

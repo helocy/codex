@@ -23,6 +23,8 @@ class ChatRequest(BaseModel):
     use_tree_index: bool = True    # 是否启用 PageIndex 两阶段检索
     use_code_analysis: bool = False  # 是否启用远程源码分析
     history: Optional[List[Dict[str, str]]] = None  # 对话历史
+    local_context: Optional[List[str]] = None  # 用户本地文档搜索结果（存储在浏览器，不在服务端）
+    user_llm_config: Optional[Dict] = None     # 用户自定义 LLM 配置（仅对该请求生效，不影响全局）
 
 
 class ChatResponse(BaseModel):
@@ -116,6 +118,22 @@ async def rag_chat(
         history = request.history or []
         web_results = []
 
+        # 如果用户提供了自定义 LLM 配置，创建临时实例（不影响全局配置）
+        active_llm = llm_service
+        if request.user_llm_config:
+            from app.services.llm_service import LLMService
+            _tmp = LLMService()
+            try:
+                _tmp.configure(
+                    provider=request.user_llm_config.get('provider', 'custom'),
+                    api_key=request.user_llm_config.get('api_key'),
+                    base_url=request.user_llm_config.get('base_url'),
+                    model=request.user_llm_config.get('model'),
+                )
+                active_llm = _tmp
+            except Exception:
+                pass  # 配置失败时回退到全局 LLM
+
         # 如果不使用 RAG，直接调用 LLM
         if not request.use_rag:
             # 如果开启了网络搜索，先搜索网络
@@ -127,11 +145,11 @@ async def rag_chat(
                         f"来源 {i+1}: {r['title']}\nURL: {r['url']}\n摘要: {r['snippet']}"
                         for i, r in enumerate(web_results)
                     ])
-                    answer = await llm_service.web_search_chat(request.query, web_context, history)
+                    answer = await active_llm.web_search_chat(request.query, web_context, history)
                 else:
-                    answer = await llm_service.plain_chat(request.query, history)
+                    answer = await active_llm.plain_chat(request.query, history)
             else:
-                answer = await llm_service.plain_chat(request.query, history)
+                answer = await active_llm.plain_chat(request.query, history)
             return {"answer": answer, "sources": [], "web_sources": web_results}
 
         # 使用 RAG 模式
@@ -149,7 +167,7 @@ async def rag_chat(
         t_search = time.time()
         if request.use_tree_index and not is_comparison:
             results, tree_referenced_nodes = await SearchService.search_with_tree_index(
-                db, request.query, llm_service,
+                db, request.query, active_llm,
                 top_k=request.top_k,
                 use_tree=True
             )
@@ -179,14 +197,16 @@ async def rag_chat(
         if request.use_web_search:
             web_results = web_search_service.search(request.query, num_results=5)
 
-        if not results and not web_results:
-            if code_analysis_task:
-                code_analysis_task.cancel()
-            answer = await llm_service.plain_chat(request.query, history)
+        if not results and not web_results and not request.local_context:
+            answer = await active_llm.plain_chat(request.query, history)
             return {"answer": answer, "sources": [], "web_sources": []}
 
         # 构建上下文 - 增加更多上下文信息
         context_parts = []
+
+        # 添加用户本地文档搜索结果（存储在浏览器端，非服务端）
+        if request.local_context:
+            context_parts.append("【我的文档（本地）】\n" + "\n\n---\n\n".join(request.local_context))
 
         # 添加 RAG 文档内容
         if results:
@@ -323,7 +343,7 @@ async def rag_chat(
             try:
                 code_analysis_result = await asyncio.to_thread(
                     analyze_code_sync, request.query, queried_models,
-                    llm_service.client, llm_service.model, rag_hints,
+                    active_llm.client, active_llm.model, rag_hints,
                 )
                 _elapsed("code_analysis", t_code)
             except Exception as e:
@@ -343,22 +363,20 @@ async def rag_chat(
         # 调用 LLM（不包含原始文档状态）
         t_llm = time.time()
         if request.use_rag and web_results:
-            # 两者都启用时，给出更详细的提示
-            answer = await llm_service.rag_chat_with_web(request.query, full_context, history)
+            answer = await active_llm.rag_chat_with_web(request.query, full_context, history)
         else:
-            # 对于对比查询，使用特殊的 prompt
             if is_comparison and results:
-                answer = await llm_service.comparison_chat(request.query, full_context, history)
+                answer = await active_llm.comparison_chat(request.query, full_context, history)
             elif request.use_original_doc and len(original_doc_info) > 0:
-                # 如果启用了原始文档搜索且找到了原始文档，使用专门的 prompt
-                answer = await llm_service.rag_chat_with_original(request.query, full_context, history)
+                answer = await active_llm.rag_chat_with_original(request.query, full_context, history)
             else:
                 if code_analysis_result and not code_analysis_result.startswith("[代码分析"):
-                    # 有源码分析结果时，用 full_context 保证分析结论传给 LLM
-                    answer = await llm_service.rag_chat_with_original(request.query, full_context, history)
+                    answer = await active_llm.rag_chat_with_original(request.query, full_context, history)
+                elif context_parts:
+                    answer = await active_llm.rag_chat_with_original(request.query, full_context, history)
                 else:
                     context_chunks = [chunk.content for chunk, _ in results] if results else []
-                    answer = await llm_service.rag_chat(request.query, context_chunks, history)
+                    answer = await active_llm.rag_chat(request.query, context_chunks, history)
 
         _elapsed("llm_generate", t_llm)
         _elapsed("total", t_start)

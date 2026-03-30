@@ -7,7 +7,7 @@ import { useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import './index.css';
 
-type Mode = 'memory' | 'chat' | 'config' | 'users' | 'myDocs';
+type Mode = 'memory' | 'chat' | 'config' | 'users';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -195,7 +195,7 @@ function App() {
   useEffect(() => {
     if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
     if (mode === 'users' && isAdmin) { loadUsers(); }
-    if (mode === 'myDocs') { loadLocalDocs(); }
+    if (mode === 'memory') { loadLocalDocs(); }
   }, [mode, isAdmin]);
 
   useEffect(() => {
@@ -486,7 +486,7 @@ function App() {
     try {
       // 搜索用户本地文档
       let localContext: string[] | undefined;
-      if (useRag && user) {
+      if (useRag) {
         try {
           const [queryEmb] = await embedTexts([userMessage.content]);
           const localResults = await searchLocalDocs(queryEmb, 5);
@@ -706,7 +706,6 @@ function App() {
 
   const getSubmitHandler = () => {
     if (mode === 'chat') return handleChat;
-    if (mode === 'myDocs') return (e: React.FormEvent) => e.preventDefault();
     return handleTextSubmit;
   };
 
@@ -717,8 +716,7 @@ function App() {
 
   const modeLabels: Record<string, string> = {
     chat: t.modeChat,
-    myDocs: language === 'zh' ? '我的文档' : 'My Docs',
-    ...(isAdmin ? { memory: t.modeMemory } : {}),
+    memory: t.modeMemory,
     ...(isAdmin ? { config: t.modeConfig } : {}),
     ...(isAdmin ? { users: language === 'zh' ? '用户管理' : 'Users' } : {}),
   };
@@ -1680,9 +1678,13 @@ function App() {
             </div>
           )}
 
-          {/* My Docs Mode */}
-          {mode === 'myDocs' && (
-            <div className="w-full max-w-3xl space-y-6">
+          {/* Memory Mode */}
+          {mode === 'memory' && (
+            <div className="w-full max-w-4xl space-y-6">
+
+              {/* 普通用户：本地文档上传 */}
+              {!isAdmin && (
+              <>
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-1">
                   {language === 'zh' ? '上传本地文档' : 'Upload Local Document'}
@@ -1762,12 +1764,9 @@ function App() {
                   </div>
                 )}
               </div>
-            </div>
-          )}
+              </>
+              )}
 
-          {/* Codex Mode */}
-          {mode === 'memory' && (
-            <div className="w-full max-w-4xl space-y-6">
               {/* 文本输入区域 */}
               {isAdmin && (
               <div className="bg-white rounded-2xl p-6 shadow-md">

@@ -256,16 +256,16 @@ export const deleteUser = async (id: number) => {
   await api.delete(`/auth/users/${id}`);
 };
 
-export const changePassword = async (userId: number, currentPassword: string, newPassword: string) => {
-  const response = await api.put(`/auth/users/${userId}/password`, {
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+  const response = await api.put('/auth/me/password', {
     current_password: currentPassword,
     new_password: newPassword,
   });
   return response.data;
 };
 
-export const changeUsername = async (userId: number, newUsername: string, currentPassword: string) => {
-  const response = await api.put(`/auth/users/${userId}/username`, {
+export const changeUsername = async (newUsername: string, currentPassword: string) => {
+  const response = await api.put('/auth/me/username', {
     new_username: newUsername,
     current_password: currentPassword,
   });

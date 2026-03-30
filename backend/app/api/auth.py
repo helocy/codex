@@ -102,6 +102,39 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User 
     db.commit()
 
 
+@router.put("/me/password")
+def change_my_password(
+    req: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(req.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="当前密码错误")
+    if not req.new_password.strip():
+        raise HTTPException(status_code=400, detail="新密码不能为空")
+    current_user.hashed_password = hash_password(req.new_password)
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/me/username")
+def change_my_username(
+    req: ChangeUsernameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(req.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="当前密码错误")
+    new_username = req.new_username.strip()
+    if not new_username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    if db.query(User).filter(User.username == new_username, User.id != current_user.id).first():
+        raise HTTPException(status_code=409, detail="用户名已被占用")
+    current_user.username = new_username
+    db.commit()
+    return {"ok": True, "username": new_username}
+
+
 @router.put("/users/{user_id}/password")
 def change_password(
     user_id: int,

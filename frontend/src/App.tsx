@@ -1589,11 +1589,11 @@ function App() {
                       const msgs: string[] = [];
                       try {
                         if (accountNewUsername.trim()) {
-                          await changeUsername(user.id, accountNewUsername.trim(), accountCurrentPassword);
+                          await changeUsername(accountNewUsername.trim(), accountCurrentPassword);
                           msgs.push(language === 'zh' ? `登录名已改为 "${accountNewUsername.trim()}"` : `Username changed to "${accountNewUsername.trim()}"`);
                         }
                         if (accountNewPassword.trim()) {
-                          await changePassword(user.id, accountCurrentPassword, accountNewPassword.trim());
+                          await changePassword(accountCurrentPassword, accountNewPassword.trim());
                           msgs.push(language === 'zh' ? '密码已更新' : 'Password updated');
                         }
                         setAccountMessage('✓ ' + msgs.join('，'));

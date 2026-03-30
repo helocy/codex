@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     DOUBAO_API_KEY: Optional[str] = None
     DOUBAO_MODEL: str = "doubao-seed-1-6-251015"
 
+    # 远程代码分析 SSH 配置
+    CODE_SSH_HOST: str = "172.16.15.99"
+    CODE_SSH_USER: str = "yzc"
+    CODE_SSH_KEY_PATH: str = "~/.ssh/id_ed25519"
+    CODE_SDK_ROOT: str = "/home/yzc/workspace/sdks"
+
+    # 代码分析专用 LLM（默认用主 LLM，可单独配置 Claude）
+    CODE_ANALYSIS_LLM_PROVIDER: Optional[str] = None   # anthropic | doubao | openai 等，为空则跟主 LLM
+    CODE_ANALYSIS_API_KEY: Optional[str] = None
+    CODE_ANALYSIS_BASE_URL: Optional[str] = None        # Anthropic API URL，留空使用默认
+    CODE_ANALYSIS_MODEL: Optional[str] = "claude-sonnet-4-6"
+
     # CORS
     BACKEND_CORS_ORIGINS: list = ["*"]
 

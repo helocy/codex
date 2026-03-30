@@ -8,6 +8,8 @@ interface Props {
   content: string;
   /** 深色背景（用户气泡）时传 true，代码块配色反转 */
   dark?: boolean;
+  /** 简洁模式：统一小字灰色，适合来源/分析结论区域 */
+  simple?: boolean;
 }
 
 const CheckIcon = () => (
@@ -54,8 +56,54 @@ const CodeBlock = ({ language, code }: { language: string; code: string }) => {
   );
 };
 
-export default function MarkdownRenderer({ content, dark = false }: Props) {
-  const prose = dark
+/** 简洁代码渲染：正文全部纯文本小字灰色，只对代码块保留格式化 */
+export function SimpleCodeRenderer({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeHighlight]}
+      components={{
+        // 段落、标题、列表项 → 纯文本
+        p({ children }) { return <p className="text-xs text-gray-500 leading-relaxed my-1">{children}</p>; },
+        h1({ children }) { return <p className="text-xs text-gray-500 leading-relaxed my-1 font-medium">{children}</p>; },
+        h2({ children }) { return <p className="text-xs text-gray-500 leading-relaxed my-1 font-medium">{children}</p>; },
+        h3({ children }) { return <p className="text-xs text-gray-500 leading-relaxed my-1 font-medium">{children}</p>; },
+        h4({ children }) { return <p className="text-xs text-gray-500 leading-relaxed my-1">{children}</p>; },
+        strong({ children }) { return <span className="text-gray-600">{children}</span>; },
+        em({ children }) { return <span>{children}</span>; },
+        ul({ children }) { return <ul className="my-1 pl-3 list-disc">{children}</ul>; },
+        ol({ children }) { return <ol className="my-1 pl-3 list-decimal">{children}</ol>; },
+        li({ children }) { return <li className="text-xs text-gray-500 my-0.5">{children}</li>; },
+        blockquote({ children }) { return <div className="text-xs text-gray-500 my-1 pl-2 border-l-2 border-gray-300">{children}</div>; },
+        a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">{children}</a>; },
+        hr() { return <hr className="border-gray-200 my-2" />; },
+        // 代码块保留格式
+        code({ className, children, ...props }) {
+          const isBlock = className?.startsWith('language-');
+          const language = (className || '').replace('language-', '');
+          if (isBlock) {
+            const rawCode = (function extractText(node: any): string {
+              if (typeof node === 'string') return node;
+              if (Array.isArray(node)) return node.map(extractText).join('');
+              if (node?.props?.children !== undefined) return extractText(node.props.children);
+              return '';
+            })(children);
+            return <CodeBlock language={language} code={rawCode.replace(/\n$/, '')} />;
+          }
+          return <code className="bg-gray-100 text-pink-600 rounded px-1 py-0.5 text-[0.8em] font-mono" {...props}>{children}</code>;
+        },
+        pre({ children }) { return <>{children}</>; },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+export default function MarkdownRenderer({ content, dark = false, simple = false }: Props) {
+  const prose = simple
+    ? 'prose-p:text-gray-500 prose-headings:text-gray-600 prose-strong:text-gray-600 prose-a:text-gray-500 prose-li:text-gray-500'
+    : dark
     ? 'prose-invert prose-p:text-gray-100 prose-headings:text-white prose-strong:text-white prose-code:text-pink-300 prose-a:text-blue-300'
     : 'prose-gray';
 
@@ -94,14 +142,19 @@ export default function MarkdownRenderer({ content, dark = false }: Props) {
           // 代码块：pre > code → 替换为自定义 CodeBlock
           code({ className, children, ...props }) {
             const isBlock = !!(props as any).node?.properties?.className ||
-              String(children).includes('\n') ||
               className?.startsWith('language-');
 
             const language = (className || '').replace('language-', '');
-            const code = String(children).replace(/\n$/, '');
 
             if (isBlock) {
-              return <CodeBlock language={language} code={code} />;
+              // Extract raw text from children (may be React nodes after rehype-highlight)
+              const rawCode = (function extractText(node: any): string {
+                if (typeof node === 'string') return node;
+                if (Array.isArray(node)) return node.map(extractText).join('');
+                if (node?.props?.children !== undefined) return extractText(node.props.children);
+                return '';
+              })(children);
+              return <CodeBlock language={language} code={rawCode.replace(/\n$/, '')} />;
             }
             // 行内代码
             return <code className={className} {...props}>{children}</code>;

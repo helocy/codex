@@ -420,6 +420,50 @@ setup_env() {
         ;;
     esac
 
+    # ── 第三步：代码分析 LLM（可选）────────────────────────────────────────
+    CODE_PROVIDER=""
+    CODE_API_KEY=""
+    CODE_BASE_URL=""
+    CODE_MODEL=""
+    CODE_PROVIDER_LABEL="（不启用，使用主 LLM）"
+
+    echo ""
+    echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BOLD}  │  第三步：代码分析专用 LLM（可选）                    │${NC}"
+    echo -e "${BOLD}  └─────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "  用于 SDK 源码分析的专用模型，不配置则使用主 LLM。"
+    echo ""
+    echo -e "  ${BLUE}1)${NC} Anthropic (Claude)  — Claude Sonnet 4.6 等"
+    echo -e "  ${BLUE}2)${NC} OpenAI 兼容接口      — 任何 OpenAI 兼容的 API"
+    echo -e "  ${BLUE}0)${NC} 跳过（使用主 LLM）"
+    echo ""
+    read -p "  请输入选项 [0-2，默认 0]: " _code_choice
+
+    case "$_code_choice" in
+      1)
+        CODE_PROVIDER="anthropic"
+        CODE_PROVIDER_LABEL="Anthropic (Claude)"
+        echo ""
+        echo -e "  ${YELLOW}→ 获取 API Key: https://console.anthropic.com${NC}"
+        echo ""
+        ask_secret CODE_API_KEY "Anthropic API Key"
+        ask CODE_MODEL "模型名称" "claude-sonnet-4-6"
+        ask CODE_BASE_URL "Base URL（留空使用默认 https://api.anthropic.com）" ""
+        ;;
+      2)
+        CODE_PROVIDER="custom"
+        CODE_PROVIDER_LABEL="OpenAI 兼容接口"
+        echo ""
+        ask CODE_BASE_URL "Base URL" ""
+        ask_secret CODE_API_KEY "API Key"
+        ask CODE_MODEL "模型名称" ""
+        ;;
+      *)
+        info "已跳过代码分析 LLM 配置，将使用主 LLM"
+        ;;
+    esac
+
     # ── 配置摘要确认 ──────────────────────────────────────────────────────────
     echo ""
     echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
@@ -432,6 +476,11 @@ setup_env() {
     [[ -n "$LLM_API_KEY" ]]  && echo -e "  API Key:  ${LLM_API_KEY:0:6}****"
     echo ""
     echo -e "  Embedding: ${GREEN}${EMBED_NOTE}${NC}"
+    echo ""
+    echo -e "  代码分析 LLM: ${GREEN}${CODE_PROVIDER_LABEL}${NC}"
+    [[ -n "$CODE_BASE_URL" ]] && echo -e "  Code Base URL: ${CODE_BASE_URL}"
+    [[ -n "$CODE_MODEL" ]]    && echo -e "  Code 模型:     ${CODE_MODEL}"
+    [[ -n "$CODE_API_KEY" ]]  && echo -e "  Code API Key:  ${CODE_API_KEY:0:6}****"
     echo ""
     read -p "  确认写入配置？(Y/n): " _confirm
     if [[ "$_confirm" == "n" || "$_confirm" == "N" ]]; then
@@ -464,6 +513,12 @@ EMBEDDING_DIM=${EMBED_DIM}
 # ── 网络搜索（可选） ─────────────────────────────
 # WEB_SEARCH_PROVIDER=duckduckgo
 # SERPER_API_KEY=
+
+# ── 代码分析专用 LLM（可选） ─────────────────────
+CODE_ANALYSIS_LLM_PROVIDER=${CODE_PROVIDER}
+CODE_ANALYSIS_API_KEY=${CODE_API_KEY}
+CODE_ANALYSIS_BASE_URL=${CODE_BASE_URL}
+CODE_ANALYSIS_MODEL=${CODE_MODEL}
 EOF
 
     success ".env 配置已写入: $ENV_FILE"

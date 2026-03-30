@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates } from './services/api';
-import MarkdownRenderer from './components/MarkdownRenderer';
+import { uploadFile, saveText, chatWithRAG, configureLLM, getLLMConfig, getDocuments, getDbStats, deleteDocument, resetDatabase, getEmbeddingConfig, configureEmbedding, exportDatabase, importDatabase, getOriginalDocPaths, addOriginalDocPath, removeOriginalDocPath, batchBuildTreeIndex, findDuplicates, configureCodeAnalysisLLM, getCodeAnalysisLLMConfig } from './services/api';
+import MarkdownRenderer, { SimpleCodeRenderer } from './components/MarkdownRenderer';
 import { useTranslation } from './i18n/useTranslation';
 import './index.css';
 
@@ -12,8 +12,11 @@ interface ChatMessage {
   sources?: any[];
   webSources?: any[];
   originalDocStatus?: string;
+  codeAnalysisStatus?: string;
+  codeAnalysisDetail?: string;
   treeNodes?: any[];
-  elapsed?: number;  // 耗时（秒）
+  elapsed?: number;
+  timings?: Record<string, number>;
 }
 
 interface LLMConfig {
@@ -93,9 +96,16 @@ function App() {
   const [useRag, setUseRag] = useState(true);  // 默认勾选知识库
   const [useWebSearch, setUseWebSearch] = useState(false);
   const [useOriginalDoc, setUseOriginalDoc] = useState(true);  // 默认勾选搜索原始文档
+  const [useCodeAnalysis, setUseCodeAnalysis] = useState(true);  // 是否启用源码分析
+  const [historyTurns, setHistoryTurns] = useState(0);  // 携带历史轮数，0=不携带
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const toggleSection = (key: string) => setExpandedSections(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
+  const [chattingElapsed, setChattingElapsed] = useState(0);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const chattingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const dirInputRef = useRef<HTMLInputElement>(null);
 
@@ -106,6 +116,7 @@ function App() {
   };
 
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(getSavedConfig());
+  const [codeAnalysisConfig, setCodeAnalysisConfig] = useState<LLMConfig>({ provider: '', model: 'claude-sonnet-4-6', base_url: '', api_key: '' });
   const [embeddingConfig, setEmbeddingConfig] = useState<EmbeddingConfig>({ provider: 'local', model: 'paraphrase-multilingual-MiniLM-L12-v2' });
   const [documents, setDocuments] = useState<any[]>([]);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
@@ -157,8 +168,22 @@ function App() {
     if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
   }, [mode]);
 
+  useEffect(() => {
+    if (chatting) {
+      setChattingElapsed(0);
+      chattingTimerRef.current = setInterval(() => setChattingElapsed(s => s + 1), 1000);
+    } else {
+      if (chattingTimerRef.current) { clearInterval(chattingTimerRef.current); chattingTimerRef.current = null; }
+    }
+    return () => { if (chattingTimerRef.current) clearInterval(chattingTimerRef.current); };
+  }, [chatting]);
+
   const loadLLMConfig = async () => {
     try { await getLLMConfig(); } catch {}
+    try {
+      const c = await getCodeAnalysisLLMConfig();
+      setCodeAnalysisConfig({ provider: c.provider || '', model: c.model || 'claude-sonnet-4-6', base_url: c.base_url || '', api_key: '' });
+    } catch {}
   };
 
   const loadEmbeddingConfig = async () => {
@@ -357,13 +382,17 @@ function App() {
     e.preventDefault();
     if (!query.trim()) return;
     const userMessage: ChatMessage = { role: 'user', content: query };
-    const currentHistory = chatMessages.map(m => ({ role: m.role, content: m.content }));
     setChatMessages(prev => [...prev, userMessage]);
     setQuery('');
     setChatting(true);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     const t0 = Date.now();
+    const history = historyTurns > 0
+      ? chatMessages.slice(-(historyTurns * 2)).map(m => ({ role: m.role, content: m.content }))
+      : [];
     try {
-      const r = await chatWithRAG(userMessage.content, 20, useRag, useWebSearch, useOriginalDoc, currentHistory);
+      const r = await chatWithRAG(userMessage.content, 20, useRag, useWebSearch, useOriginalDoc, history, true, controller.signal, useCodeAnalysis);
       const elapsed = (Date.now() - t0) / 1000;
       setChatMessages(prev => [...prev, {
         role: 'assistant',
@@ -371,13 +400,28 @@ function App() {
         sources: r.sources,
         webSources: r.web_sources,
         originalDocStatus: r.original_doc_status,
+        codeAnalysisStatus: r.code_analysis_status,
+        codeAnalysisDetail: r.code_analysis_detail,
         treeNodes: r.tree_nodes,
         elapsed,
+        timings: r.timings,
       }]);
     } catch (e: any) {
-      const elapsed = (Date.now() - t0) / 1000;
-      setChatMessages(prev => [...prev, { role: 'assistant', content: `抱歉，对话失败: ${e.response?.data?.detail || e.message}`, elapsed }]);
-    } finally { setChatting(false); }
+      if (e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
+        const elapsed = (Date.now() - t0) / 1000;
+        setChatMessages(prev => [...prev, { role: 'assistant', content: language === 'zh' ? '已停止。' : 'Stopped.', elapsed }]);
+      } else {
+        const elapsed = (Date.now() - t0) / 1000;
+        setChatMessages(prev => [...prev, { role: 'assistant', content: `抱歉，对话失败: ${e.response?.data?.detail || e.message}`, elapsed }]);
+      }
+    } finally {
+      setChatting(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleStopChat = () => {
+    abortControllerRef.current?.abort();
   };
 
   const handleTextSubmit = async (e: React.FormEvent) => {
@@ -520,6 +564,14 @@ function App() {
     } catch (e: any) { setMessage(`${t.msgError} ${language === 'zh' ? '配置失败' : 'Configuration failed'}: ${e.response?.data?.detail || e.message}`); }
   };
 
+  const handleSaveCodeAnalysisConfig = async () => {
+    try {
+      await configureCodeAnalysisLLM(codeAnalysisConfig);
+      setMessage(`✓ ${language === 'zh' ? '代码分析 LLM 配置成功' : 'Code analysis LLM configured'}`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (e: any) { setMessage(`✗ ${language === 'zh' ? '配置失败' : 'Configuration failed'}: ${(e as any).response?.data?.detail || (e as any).message}`); }
+  };
+
   const handleSaveEmbeddingConfig = async () => {
     try {
       const result = await configureEmbedding(embeddingConfig);
@@ -628,8 +680,13 @@ function App() {
                       <>
                         {thinking && (
                           <div className="mb-3 pb-3 border-b border-gray-100">
-                            <p className="text-xs text-gray-400 mb-1 font-medium">{t.thinkingProcess}</p>
-                            <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{thinking}</p>
+                            <button onClick={() => toggleSection(`think-${index}`)} className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 font-medium mb-1 w-full text-left">
+                              {t.thinkingProcess}
+                              <svg className={`ml-1 transition-transform ${expandedSections.has(`think-${index}`) ? 'rotate-180' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                            </button>
+                            {expandedSections.has(`think-${index}`) && (
+                              <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{thinking}</p>
+                            )}
                           </div>
                         )}
                         {(answer || !thinking) && (
@@ -641,43 +698,92 @@ function App() {
                     <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                   )}
                   {msg.role === 'assistant' && msg.elapsed !== undefined && (
-                    <div className="mt-3 text-xs text-gray-400">
-                      {language === 'zh' ? '耗时' : 'Time'}: {msg.elapsed.toFixed(1)}s
+                    <div className="mt-3 text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span>{language === 'zh' ? '总耗时' : 'Total'}: {msg.elapsed.toFixed(1)}s</span>
+                      {msg.timings?.['search/tree_index'] !== undefined && (
+                        <span className="text-gray-500">检索: {msg.timings['search/tree_index']}s</span>
+                      )}
+                      {msg.timings?.['original_doc_lookup'] !== undefined && (
+                        <span className="text-gray-500">原文: {msg.timings['original_doc_lookup']}s</span>
+                      )}
+                      {msg.timings?.['code_analysis'] !== undefined && (
+                        <span className="text-blue-400/70">源码分析: {msg.timings['code_analysis']}s</span>
+                      )}
+                      {msg.timings?.['llm_generate'] !== undefined && (
+                        <span className="text-gray-500">生成: {msg.timings['llm_generate']}s</span>
+                      )}
                     </div>
                   )}
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-gray-700">
+                  {((msg.sources?.length ?? 0) > 0 || msg.codeAnalysisDetail || (msg.webSources?.length ?? 0) > 0) && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 divide-y divide-gray-100 text-xs text-gray-500">
+                      {/* 命中章节 */}
                       {msg.treeNodes && msg.treeNodes.length > 0 && (
-                        <div className="mb-3">
-                          <p className="text-xs text-gray-400 mb-1">📑 {language === 'zh' ? '命中章节' : 'Matched sections'}</p>
-                          {Array.from(new Map(msg.treeNodes.map((n: any) => [`${n.doc_id}-${n.node_id}`, n])).values()).map((n: any, i: number) => (
-                            <div key={i} className="text-xs text-gray-400 mb-0.5 pl-2">
-                              · {n.doc_title} › {n.node_title}
+                        <div className="py-2">
+                          <button onClick={() => toggleSection(`tree-${index}`)} className="flex items-center gap-1 font-medium text-gray-500 hover:text-gray-700 w-full text-left">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            {language === 'zh' ? '命中章节' : 'Matched sections'}
+                            <svg className={`ml-auto transition-transform ${expandedSections.has(`tree-${index}`) ? 'rotate-180' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                          </button>
+                          {expandedSections.has(`tree-${index}`) && Array.from(new Map(msg.treeNodes.map((n: any) => [`${n.doc_id}-${n.node_id}`, n])).values()).map((n: any, i: number) => (
+                            <div key={i} className="pl-4 text-gray-400 mb-0.5 mt-1"><em>{n.doc_title} › {n.node_title}</em></div>
+                          ))}
+                        </div>
+                      )}
+                      {/* 知识库来源 */}
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="py-2">
+                          <button onClick={() => toggleSection(`sources-${index}`)} className="flex items-center gap-1 font-medium text-gray-500 hover:text-gray-700 w-full text-left">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            {t.sourceKnowledgeBase}
+                            <svg className={`ml-auto transition-transform ${expandedSections.has(`sources-${index}`) ? 'rotate-180' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                          </button>
+                          {expandedSections.has(`sources-${index}`) && Array.from(new Map(msg.sources.map((s: any) => [s.document_id, s])).values()).map((s: any, i: number) => (
+                            <div key={i} className="pl-4 text-gray-400 mb-0.5 mt-1">文档 #{s.document_id} <em>({(s.similarity * 100).toFixed(0)}% 匹配)</em></div>
+                          ))}
+                        </div>
+                      )}
+                      {/* 原始文档查找 */}
+                      {msg.originalDocStatus && (
+                        <div className="py-2">
+                          <button onClick={() => toggleSection(`origdoc-${index}`)} className="flex items-center gap-1 font-medium text-gray-500 hover:text-gray-700 w-full text-left">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                            {language === 'zh' ? '原始文档' : 'Source docs'}
+                            <svg className={`ml-auto transition-transform ${expandedSections.has(`origdoc-${index}`) ? 'rotate-180' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                          </button>
+                          {expandedSections.has(`origdoc-${index}`) && (
+                            <div className="pl-4 text-gray-400 whitespace-pre-wrap font-mono text-[11px] mt-1">{msg.originalDocStatus}</div>
+                          )}
+                        </div>
+                      )}
+                      {/* 源码分析结论 */}
+                      {msg.codeAnalysisDetail && (
+                        <div className="py-2">
+                          <button onClick={() => toggleSection(`code-${index}`)} className="flex items-center gap-1 font-medium text-gray-500 hover:text-gray-700 w-full text-left">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                            {language === 'zh' ? '源码分析结论' : 'Source Analysis'}
+                            <svg className={`ml-auto transition-transform ${expandedSections.has(`code-${index}`) ? 'rotate-180' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                          </button>
+                          {expandedSections.has(`code-${index}`) && (
+                            <div className="pl-4 mt-1">
+                              <SimpleCodeRenderer content={msg.codeAnalysisDetail} />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* 网络搜索 */}
+                      {msg.webSources && msg.webSources.length > 0 && (
+                        <div className="py-2">
+                          <p className="flex items-center gap-1 font-medium text-gray-500 mb-1">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            {t.sourceWebSearch}
+                          </p>
+                          {msg.webSources.map((s: any, i: number) => (
+                            <div key={i} className="pl-4 text-gray-400 mb-0.5">
+                              <a href={s.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{s.title}</a>
                             </div>
                           ))}
                         </div>
                       )}
-                      <p className="text-xs text-gray-400 mb-2">{t.sourceKnowledgeBase}</p>
-                      {Array.from(new Map(msg.sources.map((s: any) => [s.document_id, s])).values()).map((s: any, i: number) => (
-                        <div key={i} className="text-xs text-gray-300 mb-1">
-                          • 文档 #{s.document_id} ({(s.similarity * 100).toFixed(0)}% 匹配)
-                        </div>
-                      ))}
-                      {msg.originalDocStatus && (
-                        <div className="mt-3 pt-3 border-t border-gray-600">
-                          <pre className="text-xs text-gray-400 whitespace-pre-wrap">{msg.originalDocStatus}</pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {msg.webSources && msg.webSources.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-gray-700">
-                      <p className="text-xs text-gray-400 mb-2">{t.sourceWebSearch}</p>
-                      {msg.webSources.map((s: any, i: number) => (
-                        <div key={i} className="text-xs text-gray-300 mb-1">
-                          • <a href={s.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{s.title}</a>
-                        </div>
-                      ))}
                     </div>
                   )}
                 </div>
@@ -693,18 +799,65 @@ function App() {
               </div>
             ))}
 
-            {/* 思考中动画 */}
-            {chatting && (
-              <div className="flex items-start gap-3">
-                <div className="bg-white rounded-2xl px-6 py-4 shadow-md">
-                  <div className="flex gap-1 items-center">
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            {/* 等待动画 */}
+            {chatting && (() => {
+              if (!useCodeAnalysis) {
+                return (
+                  <div className="flex items-start gap-3">
+                    <div className="bg-white rounded-2xl px-6 py-4 shadow-md">
+                      <div className="flex gap-1 items-center">
+                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              const STAGES = [
+                { until: 8,   zh: '查询知识库', en: 'Searching' },
+                { until: 25,  zh: '阅读文档',   en: 'Reading docs' },
+                { until: 75,  zh: '分析代码',   en: 'Analyzing code' },
+                { until: 90,  zh: '交叉验证',   en: 'Cross-checking' },
+                { until: Infinity, zh: '总结',  en: 'Summarizing' },
+              ];
+              const TOTAL_EST = 130;
+              const currentIdx = STAGES.findIndex(s => chattingElapsed < s.until);
+              const safeIdx = currentIdx === -1 ? STAGES.length - 1 : currentIdx;
+              const remaining = Math.max(0, TOTAL_EST - chattingElapsed);
+              const stageLabel = language === 'zh' ? STAGES[safeIdx].zh : STAGES[safeIdx].en;
+              // Icon paths for each stage
+              const iconPaths = [
+                <circle key="s" cx="10" cy="10" r="6" />,  // search
+                <><path key="b1" d="M2 3h5a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path key="b2" d="M22 3h-5a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h6z"/></>,  // book
+                <><polyline key="c1" points="15 17 21 12 15 7"/><polyline key="c2" points="9 7 3 12 9 17"/></>,  // code
+                <><polyline key="v1" points="22 4 22 9 17 9"/><polyline key="v2" points="2 20 2 15 7 15"/><path key="v3" d="M3.5 9a9 9 0 0 1 14.8-3.4L22 9M2 15l3.7 3.7A9 9 0 0 0 20.5 15"/></>,  // refresh
+                <><path key="w1" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path key="w2" d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></>,  // pen
+              ];
+              const spinDur = ['1.8s','1.5s','2.5s','1.2s','2s'][safeIdx];
+              return (
+                <div className="flex items-start gap-3">
+                  <div className="bg-white rounded-2xl px-5 py-3 shadow-md flex items-center gap-3">
+                    {/* Spinning ring + static icon */}
+                    <div className="relative w-7 h-7 flex items-center justify-center flex-shrink-0">
+                      <svg className="absolute inset-0 animate-spin" style={{ animationDuration: spinDur }} width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <circle cx="14" cy="14" r="12" stroke="#bfdbfe" strokeWidth="2.5" strokeDasharray="18 56" strokeLinecap="round"/>
+                      </svg>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        {iconPaths[safeIdx]}
+                        {safeIdx === 0 && <line x1="18" y1="18" x2="14.5" y2="14.5" />}
+                      </svg>
+                    </div>
+                    <span className="text-sm text-gray-700 font-medium">{stageLabel}...</span>
+                    <span className="text-xs text-gray-400">
+                      {remaining > 0
+                        ? (language === 'zh' ? `还剩约 ${remaining} 秒` : `~${remaining}s left`)
+                        : (language === 'zh' ? '即将完成' : 'Almost done')}
+                    </span>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div ref={chatEndRef} />
           </div>
@@ -761,6 +914,40 @@ function App() {
                         </div>
                       ))}
                       <button onClick={handleSaveLLMConfig}
+                        className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">{t.actionSave}</button>
+                      {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-8 shadow-md">
+                    <h2 className="text-xl font-bold text-gray-900 mb-1">{language === 'zh' ? '代码分析 LLM' : 'Code Analysis LLM'}</h2>
+                    <p className="text-sm text-gray-500 mb-5">{language === 'zh' ? '用于源码分析的专用模型，留空则使用主 LLM。推荐使用 Claude（Anthropic）。' : 'Dedicated model for code analysis. Leave empty to use main LLM. Claude (Anthropic) recommended.'}</p>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">{language === 'zh' ? '提供商' : 'Provider'}</label>
+                        <select value={codeAnalysisConfig.provider} onChange={(e) => setCodeAnalysisConfig({ ...codeAnalysisConfig, provider: e.target.value })}
+                          className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none bg-white">
+                          <option value="">{language === 'zh' ? '不启用（使用主 LLM）' : 'Disabled (use main LLM)'}</option>
+                          <option value="anthropic">Anthropic (Claude)</option>
+                          <option value="openai">OpenAI</option>
+                          <option value="doubao">{language === 'zh' ? '豆包 (Doubao)' : 'Doubao'}</option>
+                          <option value="custom">{language === 'zh' ? '其他兼容接口' : 'Custom OpenAI-compatible'}</option>
+                        </select>
+                      </div>
+                      {codeAnalysisConfig.provider && [
+                        { label: language === 'zh' ? '模型名称' : 'Model', key: 'model', type: 'text', placeholder: 'claude-sonnet-4-6' },
+                        { label: 'Base URL', key: 'base_url', type: 'text', placeholder: 'https://api.anthropic.com' },
+                        { label: 'API Key', key: 'api_key', type: 'password', placeholder: 'sk-ant-...' },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
+                          <input type={f.type} value={(codeAnalysisConfig as any)[f.key] || ''}
+                            onChange={(e) => setCodeAnalysisConfig({ ...codeAnalysisConfig, [f.key]: e.target.value })}
+                            placeholder={f.placeholder}
+                            className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-gray-400 outline-none" />
+                        </div>
+                      ))}
+                      <button onClick={handleSaveCodeAnalysisConfig}
                         className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium">{t.actionSave}</button>
                       {message && <div className={`text-sm text-center ${message.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>{message}</div>}
                     </div>
@@ -1321,17 +1508,39 @@ function App() {
                           {t.optionOriginalDoc}
                         </label>
                         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                          <input type="checkbox" checked={useCodeAnalysis} onChange={(e) => setUseCodeAnalysis(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
+                          {language === 'zh' ? '源码分析' : 'Code Analysis'}
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
                           <input type="checkbox" checked={useWebSearch} onChange={(e) => setUseWebSearch(e.target.checked)} className="w-4 h-4 rounded border-gray-300" />
                           {t.optionWebSearch}
+                        </label>
+                        <label className="flex items-center gap-1.5 text-sm text-gray-600 select-none">
+                          {language === 'zh' ? '历史' : 'History'}
+                          <select value={historyTurns} onChange={(e) => setHistoryTurns(Number(e.target.value))}
+                            className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white outline-none">
+                            <option value={0}>{language === 'zh' ? '不携带' : 'Off'}</option>
+                            <option value={1}>{language === 'zh' ? '1轮' : '1 turn'}</option>
+                            <option value={2}>{language === 'zh' ? '2轮' : '2 turns'}</option>
+                            <option value={3}>{language === 'zh' ? '3轮' : '3 turns'}</option>
+                          </select>
                         </label>
                       </>
                     )}
                   </div>
-                  <button type="submit"
-                    disabled={(mode === 'chat' ? chatting : uploading) || !query.trim()}
-                    className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                    {mode === 'chat' ? (chatting ? t.chatThinking : t.chatSend) : (uploading ? t.actionSaving : t.actionSave)}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {mode === 'chat' && chatting && (
+                      <button type="button" onClick={handleStopChat}
+                        className="px-5 py-2 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors">
+                        {language === 'zh' ? '停止' : 'Stop'}
+                      </button>
+                    )}
+                    <button type="submit"
+                      disabled={(mode === 'chat' ? chatting : uploading) || !query.trim()}
+                      className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                      {mode === 'chat' ? (chatting ? t.chatThinking : t.chatSend) : (uploading ? t.actionSaving : t.actionSave)}
+                    </button>
+                  </div>
                 </div>
               </div>
             </form>

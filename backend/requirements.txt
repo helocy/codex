@@ -34,3 +34,7 @@ volcengine-python-sdk[ark]>=5.0.0
 # 网络搜索
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+
+# 远程代码分析
+paramiko>=3.4.0
+anthropic>=0.40.0

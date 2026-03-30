@@ -62,6 +62,8 @@ export const chatWithRAG = async (
   useOriginalDoc: boolean = true,
   history?: Array<{ role: string; content: string }>,
   useTreeIndex: boolean = true,
+  signal?: AbortSignal,
+  useCodeAnalysis: boolean = false,
 ) => {
   const response = await api.post('/chat/chat', {
     query,
@@ -70,8 +72,9 @@ export const chatWithRAG = async (
     use_web_search: useWebSearch,
     use_original_doc: useOriginalDoc,
     use_tree_index: useTreeIndex,
+    use_code_analysis: useCodeAnalysis,
     history: history || [],
-  });
+  }, { signal });
   return response.data;
 };
 
@@ -94,6 +97,21 @@ export const uploadDirectory = async (directoryPath: string) => {
 
 export const getLLMConfig = async () => {
   const response = await api.get('/chat/config');
+  return response.data;
+};
+
+export const configureCodeAnalysisLLM = async (config: {
+  provider: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}) => {
+  const response = await api.post('/chat/code-analysis-config', config);
+  return response.data;
+};
+
+export const getCodeAnalysisLLMConfig = async () => {
+  const response = await api.get('/chat/code-analysis-config');
   return response.data;
 };
 

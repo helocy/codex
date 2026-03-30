@@ -195,6 +195,19 @@ Add local folder paths in the "Config" page. The system will search these paths 
 
 ## 📝 Changelog
 
+### v0.5.0 (2026-03-30)
+
+- All source sections (source analysis, knowledge base, original docs, matched chapters) now support collapsible toggle, collapsed by default for a cleaner UI
+- Chat model thinking process supports collapsible toggle, collapsed by default
+- Full source code analysis result is passed to the chat model for comprehensive reasoning
+- Source analysis rendering improved: body text is uniform small gray, only code blocks retain formatting
+- Dividers added between source sections
+- Code analysis enabled by default
+- Fixed PDF original document parsing failure (installed pypdf)
+- Fixed `<think>/<thinking>` tags leaking into source analysis output
+- Fixed source analysis detail not displaying
+- Updated version to v0.5.0
+
 ### v0.4.1 (2026-03-18)
 
 - Upgraded deploy wizard: `deploy.sh` now features step-by-step interactive setup, supporting provider selection (Doubao/Qwen/OpenAI/Ollama/Custom), provider-specific prompts, hidden API key input, and a summary confirmation before writing `.env`

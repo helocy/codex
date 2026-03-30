@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     use_web_search: bool = False  # 是否使用网络搜索
     use_original_doc: bool = True  # 是否使用原始文档
     use_tree_index: bool = True    # 是否启用 PageIndex 两阶段检索
+    use_code_analysis: bool = False  # 是否启用远程源码分析
     history: Optional[List[Dict[str, str]]] = None  # 对话历史
 
 
@@ -37,12 +38,61 @@ class LLMConfigRequest(BaseModel):
     model: Optional[str] = None
 
 
+class CodeAnalysisLLMConfigRequest(BaseModel):
+    provider: str  # anthropic | openai | doubao | 留空禁用
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+
+
 def _safe_score(similarity) -> float:
     try:
         v = float(similarity)
         return 0.0 if math.isnan(v) or math.isinf(v) else v
     except Exception:
         return 0.0
+
+
+def _extract_rag_hints(results, original_contents: list) -> str:
+    """从 RAG 结果和原始文档内容中提取关键线索，供代码分析 agent 使用。"""
+    import re
+    hints = []
+
+    # 从 RAG chunks 提取
+    for chunk, _ in (results or []):
+        text = getattr(chunk, 'content', '') or ''
+        # 文件路径（.c/.h/.dts/.dtsi/.mk 等）
+        for m in re.findall(r'[\w./\-]+\.(?:c|h|dts|dtsi|mk|kconfig|S|cpp|cc)[\w./\-]*', text, re.IGNORECASE):
+            hints.append(f'- 文件路径：{m}')
+        # 函数名（snake_case 含 _init/_probe/_config/_setup/_enable 等）
+        for m in re.findall(r'\b\w+(?:_init|_probe|_config|_setup|_enable|_disable|_open|_close|_ioctl|_ops)\b', text):
+            hints.append(f'- 函数名：{m}')
+        # 全大写宏/寄存器名（至少 3 字符）
+        for m in re.findall(r'\b[A-Z][A-Z0-9_]{2,}\b', text):
+            hints.append(f'- 宏/寄存器：{m}')
+
+    # 从原始文档内容提取
+    for orig in (original_contents or []):
+        for m in re.findall(r'[\w./\-]+\.(?:c|h|dts|dtsi|mk)[\w./\-]*', orig, re.IGNORECASE):
+            hints.append(f'- 文件路径：{m}')
+        for m in re.findall(r'\b\w+(?:_init|_probe|_config|_setup|_enable|_disable|_open|_close|_ioctl|_ops)\b', orig):
+            hints.append(f'- 函数名：{m}')
+        for m in re.findall(r'\b[A-Z][A-Z0-9_]{2,}\b', orig):
+            hints.append(f'- 宏/寄存器：{m}')
+
+    if not hints:
+        return ''
+
+    # 去重，限制总长度
+    seen = set()
+    deduped = []
+    for h in hints:
+        if h not in seen:
+            seen.add(h)
+            deduped.append(h)
+
+    result = '\n'.join(deduped)
+    return result[:1000]
 
 
 @router.post("/chat")
@@ -53,10 +103,12 @@ async def rag_chat(
     """智能对话 - 支持 RAG 模式、网络搜索和直接对话模式"""
     import time
     t_start = time.time()
+    _timings: dict = {}
     def _elapsed(label: str, t0: float = None):
         now = time.time()
         since = now - (t0 or t_start)
         total = now - t_start
+        _timings[label] = round(since, 2)
         print(f"[Chat timing] {label}: +{since:.2f}s (total {total:.2f}s)", flush=True)
         return now
 
@@ -83,10 +135,14 @@ async def rag_chat(
             return {"answer": answer, "sources": [], "web_sources": web_results}
 
         # 使用 RAG 模式
-        # 检测是否是对比类查询（包含"对比"、"比较"、"vs"、"和"等关键词）
-        import re
+        import re, asyncio
         comparison_keywords = ['对比', '比较', 'vs', 'versus', '区别', '差异']
         is_comparison = any(kw in request.query.lower() for kw in comparison_keywords)
+
+        # 提取芯片型号（代码分析将在 RAG 完成后串行执行）
+        chip_pattern = re.compile(r'[A-Z]{2,}[0-9]+[A-Z0-9]*', re.IGNORECASE)
+        queried_models = chip_pattern.findall(request.query)
+        t_code = time.time()
 
         # PageIndex 两阶段检索（有树形索引时优先使用）
         tree_referenced_nodes = []
@@ -108,9 +164,6 @@ async def rag_chat(
         t_search = _elapsed("search/tree_index", t_search)
 
         # 如果 query 中提到了特定芯片/产品型号，将匹配文档的 chunk 提到最前面
-        # 避免文档数量多的型号淹没文档少的目标型号
-        chip_pattern = re.compile(r'[A-Z]{2,}[0-9]+[A-Z0-9]*', re.IGNORECASE)
-        queried_models = chip_pattern.findall(request.query)
         if queried_models and results:
             from app.models.document import Document as _Doc
             result_doc_ids = list({c.document_id for c, _ in results})
@@ -127,6 +180,8 @@ async def rag_chat(
             web_results = web_search_service.search(request.query, num_results=5)
 
         if not results and not web_results:
+            if code_analysis_task:
+                code_analysis_task.cancel()
             answer = await llm_service.plain_chat(request.query, history)
             return {"answer": answer, "sources": [], "web_sources": []}
 
@@ -259,6 +314,32 @@ async def rag_chat(
 
         t_origdoc = _elapsed("original_doc_lookup", t_origdoc)
 
+        # 串行执行代码分析（RAG + 原始文档完成后，提取线索再调用）
+        code_analysis_result = None
+        if request.use_code_analysis and queried_models:
+            from app.services.code_analysis_service import analyze_code_sync
+            rag_hints = _extract_rag_hints(results, original_contents)
+            t_code = time.time()
+            try:
+                code_analysis_result = await asyncio.to_thread(
+                    analyze_code_sync, request.query, queried_models,
+                    llm_service.client, llm_service.model, rag_hints,
+                )
+                _elapsed("code_analysis", t_code)
+            except Exception as e:
+                code_analysis_result = f"[代码分析异常] {e}"
+                print(f"[CodeAnalysis] error: {e}", flush=True)
+
+        # 组装完整上下文（代码分析结果追加在最后，过滤思考过程）
+        import re as _re2
+        def _clean_think(t: str) -> str:
+            s = _re2.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', t, flags=_re2.IGNORECASE)
+            s = _re2.sub(r'<think(?:ing)>[\s\S]*$', '', s, flags=_re2.IGNORECASE)
+            return s.strip()
+        if code_analysis_result:
+            context_parts.append(f"【SDK 源码分析结果】\n{_clean_think(code_analysis_result)}")
+        full_context = "\n\n".join(context_parts)
+
         # 调用 LLM（不包含原始文档状态）
         t_llm = time.time()
         if request.use_rag and web_results:
@@ -272,8 +353,12 @@ async def rag_chat(
                 # 如果启用了原始文档搜索且找到了原始文档，使用专门的 prompt
                 answer = await llm_service.rag_chat_with_original(request.query, full_context, history)
             else:
-                context_chunks = [chunk.content for chunk, _ in results] if results else []
-                answer = await llm_service.rag_chat(request.query, context_chunks, history)
+                if code_analysis_result and not code_analysis_result.startswith("[代码分析"):
+                    # 有源码分析结果时，用 full_context 保证分析结论传给 LLM
+                    answer = await llm_service.rag_chat_with_original(request.query, full_context, history)
+                else:
+                    context_chunks = [chunk.content for chunk, _ in results] if results else []
+                    answer = await llm_service.rag_chat(request.query, context_chunks, history)
 
         _elapsed("llm_generate", t_llm)
         _elapsed("total", t_start)
@@ -289,12 +374,27 @@ async def rag_chat(
             for chunk, similarity in results
         ]
 
+        is_code_error = code_analysis_result and code_analysis_result.startswith("[代码分析")
+        # 过滤掉 <think>...</think> 内部推理块，只保留最终结论
+        import re as _re
+        def _strip_think(text: str) -> str:
+            if not text:
+                return text
+            # 过滤完整闭合的 <think>...</think>
+            stripped = _re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', text, flags=_re.IGNORECASE)
+            # 过滤未闭合的 <think> 到末尾
+            stripped = _re.sub(r'<think(?:ing)?>[\.\s\S]*$', '', stripped, flags=_re.IGNORECASE)
+            return stripped.strip()
+        code_detail_clean = _strip_think(code_analysis_result) if code_analysis_result and not is_code_error else None
         return {
             "answer": answer,
             "sources": sources,
             "web_sources": web_results,
             "original_doc_status": original_doc_status,
-            "tree_nodes": tree_referenced_nodes,  # PageIndex 命中的章节节点
+            "tree_nodes": tree_referenced_nodes,
+            "code_analysis_status": "" if not code_analysis_result or is_code_error else "已分析源码",
+            "code_analysis_detail": code_detail_clean,
+            "timings": _timings,
         }
 
     except ValueError as e:
@@ -329,4 +429,34 @@ async def get_llm_config():
         "provider": llm_service.provider,
         "model": llm_service.model,
         "configured": llm_service.client is not None
+    }
+
+
+@router.post("/code-analysis-config")
+async def configure_code_analysis_llm(config: CodeAnalysisLLMConfigRequest):
+    """配置代码分析专用 LLM"""
+    try:
+        from app.core.config import settings
+        settings.CODE_ANALYSIS_LLM_PROVIDER = config.provider
+        settings.CODE_ANALYSIS_API_KEY = config.api_key or ""
+        settings.CODE_ANALYSIS_BASE_URL = config.base_url or ""
+        settings.CODE_ANALYSIS_MODEL = config.model or "claude-sonnet-4-6"
+        return {
+            "message": "代码分析 LLM 配置成功",
+            "provider": config.provider,
+            "model": config.model or "claude-sonnet-4-6",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"配置失败: {str(e)}")
+
+
+@router.get("/code-analysis-config")
+async def get_code_analysis_llm_config():
+    """获取代码分析 LLM 配置"""
+    from app.core.config import settings
+    return {
+        "provider": settings.CODE_ANALYSIS_LLM_PROVIDER or "",
+        "model": settings.CODE_ANALYSIS_MODEL or "claude-sonnet-4-6",
+        "base_url": settings.CODE_ANALYSIS_BASE_URL or "",
+        "configured": bool(settings.CODE_ANALYSIS_LLM_PROVIDER and settings.CODE_ANALYSIS_API_KEY),
     }

@@ -248,7 +248,7 @@ export const translations: Record<Language, Translations> = {
     dialogImportTitle: '导入数据库',
     dialogImportMessage: '导入会添加备份文件中的所有文档到当前数据库。如果需要完全恢复备份，请先重置知识库。确定要继续吗？',
 
-    sourceKnowledgeBase: '知识库来源：',
+    sourceKnowledgeBase: '知识库来源',
     sourceWebSearch: '网络来源：',
     sourceOriginalDoc: '原始文档：',
     sourceOriginalDocStatus: '原始文档查找情况',
@@ -258,7 +258,7 @@ export const translations: Record<Language, Translations> = {
 
     thinkingProcess: '思考过程',
 
-    footerText: 'Codex v0.4.2 · 基于本地 AI 的智能笔记系统 · by Zhichao',
+    footerText: 'Codex v0.5.0 · 基于本地 AI 的智能笔记系统 · by Zhichao',
 
     fileTypeMarkdown: '📝 Markdown',
     fileTypePdf: '📄 PDF',
@@ -379,7 +379,7 @@ export const translations: Record<Language, Translations> = {
     dialogImportTitle: 'Import Database',
     dialogImportMessage: 'Import will add all documents from the backup file to the current database. If you need to fully restore the backup, please reset the database first. Continue?',
 
-    sourceKnowledgeBase: 'Knowledge Base Sources:',
+    sourceKnowledgeBase: 'Knowledge Base Sources',
     sourceWebSearch: 'Web Sources:',
     sourceOriginalDoc: 'Original Document:',
     sourceOriginalDocStatus: 'Original Document Search Status',
@@ -389,7 +389,7 @@ export const translations: Record<Language, Translations> = {
 
     thinkingProcess: 'Thinking Process',
 
-    footerText: 'Codex v0.4.2 · Local AI-powered Knowledge Base · by Zhichao',
+    footerText: 'Codex v0.5.0 · Local AI-powered Knowledge Base · by Zhichao',
 
     fileTypeMarkdown: '📝 Markdown',
     fileTypePdf: '📄 PDF',

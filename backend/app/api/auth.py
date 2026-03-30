@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timedelta
 from jose import jwt
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.config import settings
@@ -11,7 +11,6 @@ from app.core.deps import get_current_user, require_admin
 from app.models.user import User
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class LoginRequest(BaseModel):
@@ -36,11 +35,11 @@ class ChangeUsernameRequest(BaseModel):
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
 
 def create_access_token(username: str, role: str) -> str:
@@ -132,7 +131,8 @@ def change_my_username(
         raise HTTPException(status_code=409, detail="用户名已被占用")
     current_user.username = new_username
     db.commit()
-    return {"ok": True, "username": new_username}
+    new_token = create_access_token(new_username, current_user.role)
+    return {"ok": True, "username": new_username, "access_token": new_token}
 
 
 @router.put("/users/{user_id}/password")

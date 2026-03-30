@@ -12,6 +12,7 @@ interface AuthContextValue {
   token: string | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  updateSession: (newToken: string, newUsername: string) => void;
   isAdmin: boolean;
 }
 
@@ -20,6 +21,7 @@ const AuthContext = createContext<AuthContextValue>({
   token: null,
   login: async () => {},
   logout: () => {},
+  updateSession: () => {},
   isAdmin: false,
 });
 
@@ -51,8 +53,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser({ id, username: uname, role });
   }, []);
 
+  const updateSession = useCallback((newToken: string, newUsername: string) => {
+    localStorage.setItem(TOKEN_KEY, newToken);
+    setToken(newToken);
+    setUser(prev => prev ? { ...prev, username: newUsername } : prev);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAdmin: user?.role === 'admin' }}>
+    <AuthContext.Provider value={{ user, token, login, logout, updateSession, isAdmin: user?.role === 'admin' }}>
       {children}
     </AuthContext.Provider>
   );

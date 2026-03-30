@@ -7,7 +7,7 @@ import { useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import './index.css';
 
-type Mode = 'memory' | 'chat' | 'config' | 'users';
+type Mode = 'memory' | 'chat' | 'config';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -88,7 +88,7 @@ function parseThinking(content: string): { thinking: string | null; answer: stri
 
 function App() {
   const { t, language, switchLanguage } = useTranslation();
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, logout, updateSession } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   const [usersList, setUsersList] = useState<any[]>([]);
   const [newUsername, setNewUsername] = useState('');
@@ -154,7 +154,7 @@ function App() {
   const [duplicateSearching, setDuplicateSearching] = useState(false);
   const [duplicateSearched, setDuplicateSearched] = useState(false);
   const [docsMessage, setDocsMessage] = useState('');
-  const [configTab, setConfigTab] = useState<'model' | 'database' | 'docs'>('model');
+  const [configTab, setConfigTab] = useState<'model' | 'database' | 'docs' | 'users'>('model');
 
   // 本地文档（存储在浏览器 IndexedDB，不上传服务端）
   const [localDocs, setLocalDocs] = useState<any[]>([]);
@@ -194,8 +194,7 @@ function App() {
   }, [isAdmin]);
 
   useEffect(() => {
-    if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); }
-    if (mode === 'users' && isAdmin) { loadUsers(); }
+    if (mode === 'config') { loadDbStats(); loadDocuments(); loadOriginalDocPaths(); if (isAdmin) loadUsers(); }
     if (mode === 'memory') { loadLocalDocs(); }
   }, [mode, isAdmin]);
 
@@ -719,7 +718,6 @@ function App() {
     chat: t.modeChat,
     memory: t.modeMemory,
     ...(isAdmin ? { config: t.modeConfig } : {}),
-    ...(isAdmin ? { users: language === 'zh' ? '👥 用户管理' : '👥 Users' } : {}),
   };
 
   const actionBtn = (onClick: () => void, children: React.ReactNode, label: string) => (
@@ -824,8 +822,8 @@ function App() {
         <div className="w-full max-w-4xl flex justify-end mb-2">
           {user ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">
-                {user.username}{user.role === 'admin' && <span className="ml-1 text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">admin</span>}
+              <span className={`text-sm ${isAdmin ? 'font-bold text-red-600' : 'text-blue-600'}`}>
+                {user.username}
               </span>
               {!isAdmin && (
                 <button
@@ -1098,8 +1096,8 @@ function App() {
 
               {/* Tab Bar */}
               <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                {(['model', 'database', 'docs'] as const).map((tab) => {
-                  const labels = { model: language === 'zh' ? '模型配置' : 'Model', database: language === 'zh' ? '数据库配置' : 'Database', docs: language === 'zh' ? '文档列表' : 'Documents' };
+                {(['model', 'database', 'docs', ...(isAdmin ? ['users'] : [])] as const).map((tab) => {
+                  const labels: Record<string, string> = { model: language === 'zh' ? '模型配置' : 'Model', database: language === 'zh' ? '数据库配置' : 'Database', docs: language === 'zh' ? '文档列表' : 'Documents', users: language === 'zh' ? '用户管理' : 'Users' };
                   return (
                     <button
                       key={tab}
@@ -1551,14 +1549,9 @@ function App() {
                 </div>
               )}
 
-            </div>
-          )}
+              {/* Users Tab */}
+              {configTab === 'users' && isAdmin && (<>
 
-          {/* Users Mode (admin only) */}
-          {mode === 'users' && isAdmin && (
-            <div className="w-full max-w-2xl space-y-6">
-
-              {/* 账号设置 */}
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">{language === 'zh' ? '我的账号' : 'My Account'}</h3>
                 <div className="space-y-3">
@@ -1599,7 +1592,10 @@ function App() {
                       const msgs: string[] = [];
                       try {
                         if (accountNewUsername.trim()) {
-                          await changeUsername(accountNewUsername.trim(), accountCurrentPassword);
+                          const res = await changeUsername(accountNewUsername.trim(), accountCurrentPassword);
+                          if (res.access_token) {
+                            updateSession(res.access_token, accountNewUsername.trim());
+                          }
                           msgs.push(language === 'zh' ? `登录名已改为 "${accountNewUsername.trim()}"` : `Username changed to "${accountNewUsername.trim()}"`);
                         }
                         if (accountNewPassword.trim()) {
@@ -1608,10 +1604,6 @@ function App() {
                         }
                         setAccountMessage('✓ ' + msgs.join('，'));
                         setAccountCurrentPassword(''); setAccountNewUsername(''); setAccountNewPassword(''); setAccountConfirmPassword('');
-                        if (accountNewUsername.trim()) {
-                          // 用户名变了，需要重新登录
-                          setTimeout(() => { logout(); }, 1500);
-                        }
                       } catch (e: any) {
                         setAccountMessage('✗ ' + (e.response?.data?.detail || e.message));
                       }
@@ -1685,6 +1677,8 @@ function App() {
                   {usersList.length === 0 && <p className="text-sm text-gray-400">{language === 'zh' ? '暂无用户' : 'No users'}</p>}
                 </div>
               </div>
+              </>)}
+
             </div>
           )}
 

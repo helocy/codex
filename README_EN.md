@@ -195,6 +195,14 @@ Add local folder paths in the "Config" page. The system will search these paths 
 
 ## 📝 Changelog
 
+### v0.6.0 (2026-03-30)
+
+- User management merged into config page as a dedicated "Users" sub-tab; removed the standalone top-level tab
+- Fixed login 500 error caused by passlib 1.7.4 incompatibility with bcrypt 4.0.1; now uses bcrypt directly
+- Username change returns a new token from the backend; frontend refreshes session automatically without re-login
+- Username display in top-right corner: admin shown in bold red, regular users in blue
+- Fixed "Not Found" / "Not authenticated" errors when saving account changes
+
 ### v0.5.0 (2026-03-30)
 
 - All source sections (source analysis, knowledge base, original docs, matched chapters) now support collapsible toggle, collapsed by default for a cleaner UI

@@ -604,12 +604,13 @@ function App() {
     text: t.fileTypeText, audio: t.fileTypeAudio, image: t.fileTypeImage, video: t.fileTypeVideo,
   };
 
+  const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
   const modeLabels: Record<string, string> = {
-    chat: t.modeChat, memory: t.modeMemory, config: t.modeConfig,
+    chat: t.modeChat, memory: t.modeMemory,
+    ...((isLocalhost || isAdmin) ? { config: t.modeConfig } : {}),
     ...(isAdmin ? { users: language === 'zh' ? '用户管理' : 'Users' } : {}),
   };
-
-  const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   const actionBtn = (onClick: () => void, children: React.ReactNode, label: string) => (
     <button
@@ -1545,7 +1546,7 @@ function App() {
                 </div>
               )}
 
-              {documents.length > 0 && (
+              {(isLocalhost || isAdmin) && documents.length > 0 && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
                   <h3 className="text-lg font-bold text-gray-900 mb-4">{t.memoryDocumentList} ({documents.length})</h3>
                   <div className="space-y-2 max-h-64 overflow-y-auto">

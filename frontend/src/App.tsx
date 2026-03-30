@@ -604,11 +604,9 @@ function App() {
     text: t.fileTypeText, audio: t.fileTypeAudio, image: t.fileTypeImage, video: t.fileTypeVideo,
   };
 
-  const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-
   const modeLabels: Record<string, string> = {
     chat: t.modeChat, memory: t.modeMemory,
-    ...((isLocalhost || isAdmin) ? { config: t.modeConfig } : {}),
+    ...(isAdmin ? { config: t.modeConfig } : {}),
     ...(isAdmin ? { users: language === 'zh' ? '用户管理' : 'Users' } : {}),
   };
 
@@ -930,7 +928,7 @@ function App() {
                 <div className="space-y-6">
 
               {/* LLM + Embedding Config (localhost only) */}
-              {isLocalhost && (
+              {isAdmin && (
                 <>
                   <div className="bg-white rounded-2xl p-8 shadow-md">
                     <h2 className="text-xl font-bold text-gray-900 mb-5">{t.configLlm}</h2>
@@ -1108,7 +1106,7 @@ function App() {
               </div>
 
               {/* 原始文档搜索路径 (localhost only) */}
-              {isLocalhost && (
+              {isAdmin && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
                   <h3 className="text-lg font-bold text-gray-900 mb-1">{t.configOriginalDocPath}</h3>
                   <p className="text-xs text-gray-400 mb-4">{t.configOriginalDocPathDesc}</p>
@@ -1170,7 +1168,7 @@ function App() {
                   className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium">
                   {t.actionExport}
                 </button>
-                {isLocalhost && (
+                {isAdmin && (
                   <>
                     <label className="px-5 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors text-sm font-medium cursor-pointer">
                       {t.actionImport}
@@ -1190,7 +1188,7 @@ function App() {
                 </div>
               )}
 
-              {isLocalhost && (
+              {isAdmin && (
                 <div className="bg-white rounded-2xl shadow-md p-6">
                   <div className="flex items-center justify-between mb-4">
                     <div>
@@ -1283,7 +1281,7 @@ function App() {
                   {docSearch && (
                     <button onClick={() => setDocSearch('')} className="text-xs text-gray-400 hover:text-gray-600 shrink-0">{t.actionClear}</button>
                   )}
-                  {(isLocalhost || isAdmin) && documents.length > 0 && (
+                  {isAdmin && documents.length > 0 && (
                     <button
                       onClick={handleBatchBuildTreeIndex}
                       disabled={batchBuilding}
@@ -1340,7 +1338,7 @@ function App() {
                                 <p className="text-xs text-gray-400">{new Date(doc.created_at).toLocaleString()}</p>
                               </div>
                             </div>
-                            {(isLocalhost || isAdmin) && (
+                            {isAdmin && (
                               <button onClick={() => handleDeleteDocument(doc)}
                                 className="ml-4 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors shrink-0">
                                 {t.actionDelete}
@@ -1434,7 +1432,7 @@ function App() {
           {mode === 'memory' && (
             <div className="w-full max-w-4xl space-y-6">
               {/* 文本输入区域 */}
-              {(isLocalhost || isAdmin) && (
+              {isAdmin && (
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-1">{t.memoryTextInput}</h3>
                 <p className="text-xs text-gray-400 mb-3">{t.memoryTextInputDesc}</p>
@@ -1468,7 +1466,7 @@ function App() {
               </div>
               )}
 
-              {(isLocalhost || isAdmin) && (
+              {isAdmin && (
               <div className="bg-white rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-bold text-gray-900 mb-1">{t.memoryUploadTitle}</h3>
                 <p className="text-xs text-gray-400 mb-5">{t.memoryUploadDesc}</p>
@@ -1546,7 +1544,7 @@ function App() {
                 </div>
               )}
 
-              {(isLocalhost || isAdmin) && documents.length > 0 && (
+              {isAdmin && documents.length > 0 && (
                 <div className="bg-white rounded-2xl p-6 shadow-md">
                   <h3 className="text-lg font-bold text-gray-900 mb-4">{t.memoryDocumentList} ({documents.length})</h3>
                   <div className="space-y-2 max-h-64 overflow-y-auto">

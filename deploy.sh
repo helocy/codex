@@ -388,11 +388,15 @@ setup_env() {
     read -p "  请输入选项 [1-3，默认 1]: " _emb_choice
 
     EMBED_MODEL="paraphrase-multilingual-MiniLM-L12-v2"
+    EMBED_PROVIDER="local"
     EMBED_DIM=384
     EMBED_NOTE="本地免费模型"
+    EMBED_API_KEY=""
+    EMBED_BASE_URL=""
 
     case "$_emb_choice" in
       2)
+        EMBED_PROVIDER="doubao"
         EMBED_NOTE="豆包 Embedding"
         ask EMBED_MODEL "Embedding 模型名称" "doubao-embedding-vision-251215"
         EMBED_DIM=2048
@@ -404,6 +408,7 @@ setup_env() {
         fi
         ;;
       3)
+        EMBED_PROVIDER="openai"
         EMBED_NOTE="OpenAI 兼容 Embedding"
         ask EMBED_MODEL "模型名称" "text-embedding-3-small"
         ask EMBED_BASE_URL "Base URL" "https://api.openai.com/v1"
@@ -464,6 +469,20 @@ setup_env() {
         ;;
     esac
 
+    # ── 第四步：管理员账号 ────────────────────────────────────────────────
+    echo ""
+    echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BOLD}  │  第四步：管理员账号                                  │${NC}"
+    echo -e "${BOLD}  └─────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "  系统启动时将自动创建此管理员账号（仅首次部署生效）。"
+    echo ""
+    ask ADMIN_USERNAME_VAL "管理员用户名" "admin"
+    ask_secret ADMIN_PASSWORD_VAL "管理员密码（建议 8 位以上）"
+    if [[ -z "$ADMIN_PASSWORD_VAL" ]]; then
+        warn "未设置管理员密码，系统启动后不会自动创建管理员账号，请手动创建"
+    fi
+
     # ── 配置摘要确认 ──────────────────────────────────────────────────────────
     echo ""
     echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
@@ -482,11 +501,18 @@ setup_env() {
     [[ -n "$CODE_MODEL" ]]    && echo -e "  Code 模型:     ${CODE_MODEL}"
     [[ -n "$CODE_API_KEY" ]]  && echo -e "  Code API Key:  ${CODE_API_KEY:0:6}****"
     echo ""
+    echo -e "  管理员账号: ${GREEN}${ADMIN_USERNAME_VAL}${NC}"
+    echo ""
     read -p "  确认写入配置？(Y/n): " _confirm
     if [[ "$_confirm" == "n" || "$_confirm" == "N" ]]; then
         warn "已取消，请部署完成后手动编辑 backend/.env"
         # 仍需写入最基础的数据库配置
     fi
+
+    # 生成随机 SECRET_KEY
+    SECRET_KEY_VAL=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null \
+        || openssl rand -hex 32 2>/dev/null \
+        || echo "change-me-$(date +%s)")
 
     # ── 写入 .env ─────────────────────────────────────────────────────────────
     cat > "$ENV_FILE" << EOF
@@ -501,13 +527,13 @@ POSTGRES_PORT=5432
 UPLOAD_DIR=./uploads
 
 # ── 大模型配置 ──────────────────────────────────
-LLM_PROVIDER=${LLM_PROVIDER}
-LLM_API_KEY=${LLM_API_KEY}
-LLM_BASE_URL=${LLM_BASE_URL}
-LLM_MODEL=${LLM_MODEL}
+LLM_PROVIDER="${LLM_PROVIDER}"
+LLM_API_KEY="${LLM_API_KEY}"
+LLM_BASE_URL="${LLM_BASE_URL}"
+LLM_MODEL="${LLM_MODEL}"
 
 # ── Embedding 模型 ──────────────────────────────
-EMBEDDING_MODEL=${EMBED_MODEL}
+EMBEDDING_MODEL="${EMBED_MODEL}"
 EMBEDDING_DIM=${EMBED_DIM}
 
 # ── 网络搜索（可选） ─────────────────────────────
@@ -515,13 +541,33 @@ EMBEDDING_DIM=${EMBED_DIM}
 # SERPER_API_KEY=
 
 # ── 代码分析专用 LLM（可选） ─────────────────────
-CODE_ANALYSIS_LLM_PROVIDER=${CODE_PROVIDER}
-CODE_ANALYSIS_API_KEY=${CODE_API_KEY}
-CODE_ANALYSIS_BASE_URL=${CODE_BASE_URL}
-CODE_ANALYSIS_MODEL=${CODE_MODEL}
+CODE_ANALYSIS_LLM_PROVIDER="${CODE_PROVIDER}"
+CODE_ANALYSIS_API_KEY="${CODE_API_KEY}"
+CODE_ANALYSIS_BASE_URL="${CODE_BASE_URL}"
+CODE_ANALYSIS_MODEL="${CODE_MODEL}"
+
+# ── 认证 ────────────────────────────────────────
+SECRET_KEY="${SECRET_KEY_VAL}"
+ADMIN_USERNAME="${ADMIN_USERNAME_VAL}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD_VAL}"
 EOF
 
     success ".env 配置已写入: $ENV_FILE"
+
+    # ── 写入 Embedding 配置 JSON（非本地模型时）─────────────────────────────
+    if [[ "$EMBED_PROVIDER" != "local" ]]; then
+        mkdir -p "$BACKEND_DIR/config"
+        cat > "$BACKEND_DIR/config/embedding_config.json" << EMBCFG
+{
+  "provider": "${EMBED_PROVIDER}",
+  "model": "${EMBED_MODEL}",
+  "api_key": "${EMBED_API_KEY}",
+  "base_url": "${EMBED_BASE_URL}"
+}
+EMBCFG
+        success "嵌入模型配置已写入: backend/config/embedding_config.json"
+    fi
+
     echo ""
     echo -e "  ${YELLOW}提示: 可随时编辑 backend/.env 修改配置，或启动后在「配置」页面调整${NC}"
 }
@@ -575,13 +621,13 @@ echo "启动后端 http://localhost:8001 ..."
 cd "$BACKEND_DIR"
 if [ -d "venv" ]; then
     source venv/bin/activate
-    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload \
+    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
         > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
     deactivate
 else
     # 没有 venv，尝试直接使用系统 Python
-    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload \
+    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
         > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
 fi
@@ -654,12 +700,14 @@ print_done() {
     echo -e "    API 文档:  ${BLUE}http://localhost:8001/docs${NC}"
     echo ""
     echo -e "  ${BOLD}首次使用：${NC}"
-    echo -e "    1. 在「配置」页配置大模型 API Key"
-    echo -e "    2. 在「记忆」页上传 Markdown 文档建立知识库"
-    echo -e "    3. 在「对话」页与大模型对话，开启知识库模式"
+    echo -e "    1. 运行 ${BLUE}bash start.sh${NC} 启动服务"
+    echo -e "    2. 使用部署时设置的管理员账号登录"
+    echo -e "    3. 在「配置」页配置大模型 API Key（如部署时已跳过）"
+    echo -e "    4. 在「记忆」页上传 Markdown 文档建立知识库"
+    echo -e "    5. 在「对话」页与大模型对话，开启知识库模式"
     echo ""
-    if [[ ! -s "$BACKEND_DIR/.env" ]] || ! grep -q "DOUBAO_API_KEY=." "$BACKEND_DIR/.env" 2>/dev/null; then
-        echo -e "  ${YELLOW}提示: 尚未配置 API Key，请启动后在「配置」页面配置${NC}"
+    if ! grep -qE 'LLM_API_KEY=".+"' "$BACKEND_DIR/.env" 2>/dev/null; then
+        echo -e "  ${YELLOW}提示: 尚未配置大模型 API Key，请启动后在「配置」页面配置${NC}"
         echo ""
     fi
 }

@@ -23,7 +23,7 @@ markdown==3.5.2
 
 # 认证
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
 
 # 工具库
 pydantic>=2.10.0

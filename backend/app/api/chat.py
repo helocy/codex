@@ -336,7 +336,7 @@ async def rag_chat(
 
         # 串行执行代码分析（RAG + 原始文档完成后，提取线索再调用）
         code_analysis_result = None
-        if request.use_code_analysis and queried_models:
+        if request.use_code_analysis:
             from app.services.code_analysis_service import analyze_code_sync
             rag_hints = _extract_rag_hints(results, original_contents)
             t_code = time.time()

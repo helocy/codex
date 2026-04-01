@@ -196,22 +196,22 @@ async def analyze_code(query: str, chip_models: List[str], llm_client=None, llm_
         use_anthropic = (dedicated_provider == "anthropic")
     else:
         use_anthropic = False
-    if not chip_models:
-        return None
-
-    # 确认有对应 SDK
+    # 确认有对应 SDK；无芯片型号时从 workspace 根目录开始
     available = {}
     try:
         all_sdks = remote_code_service.list_sdks()
-        for model in chip_models:
-            path = remote_code_service.find_sdk_path(model)
-            if path:
-                available[model] = path
+        if chip_models:
+            for model in chip_models:
+                path = remote_code_service.find_sdk_path(model)
+                if path:
+                    available[model] = path
+            if not available:
+                return f"[代码分析] 未找到以下芯片的 SDK：{chip_models}，可用 SDK：{list(all_sdks.keys())}"
+        else:
+            # 无指定芯片，使用 workspace 根目录（包含所有 SDK）
+            available["workspace"] = settings.CODE_SDK_ROOT
     except Exception as e:
         return f"[代码分析] 连接远程服务器失败：{e}"
-
-    if not available:
-        return f"[代码分析] 未找到以下芯片的 SDK：{chip_models}，可用 SDK：{list(all_sdks.keys())}"
 
     # 预加载各芯片的文档列表，注入到初始消息，省去 agent 自己调 list_sdk_docs 的一轮
     doc_index_parts = []

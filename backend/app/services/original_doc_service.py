@@ -21,6 +21,14 @@ except ImportError:
 class OriginalDocService:
     """原始文档路径管理服务"""
 
+    # PDF 两级缓存：
+    #   L1: (file_path, mtime) -> PdfReader         避免重复解析文件结构
+    #   L2: (file_path, mtime, page_idx) -> str     避免重复提取页面文字
+    _pdf_reader_cache: dict = {}
+    _pdf_text_cache: dict = {}
+    _PDF_CACHE_MAX = 20    # 最多缓存 20 个 PdfReader 对象
+    _PDF_TEXT_MAX = 5000   # 最多缓存 5000 页文字
+
     def __init__(self):
         self.paths: List[str] = []
         self._load_config()
@@ -146,15 +154,34 @@ class OriginalDocService:
 
         elif ext == '.pdf' and PDF_AVAILABLE:
             try:
-                reader = PdfReader(file_path)
+                mtime = os.path.getmtime(file_path)
+                cache = OriginalDocService._pdf_reader_cache
+                key = (file_path, mtime)
+
+                if key not in cache:
+                    if len(cache) >= OriginalDocService._PDF_CACHE_MAX:
+                        # FIFO 淘汰最旧的一个
+                        del cache[next(iter(cache))]
+                    cache[key] = PdfReader(file_path)
+
+                reader = cache[key]
                 total_pages = len(reader.pages)
 
+                def _get_page_text(idx: int) -> str:
+                    """从 L2 缓存获取页面文字，缺失时提取并缓存。"""
+                    text_cache = OriginalDocService._pdf_text_cache
+                    text_key = (file_path, mtime, idx)
+                    if text_key not in text_cache:
+                        if len(text_cache) >= OriginalDocService._PDF_TEXT_MAX:
+                            del text_cache[next(iter(text_cache))]
+                        text_cache[text_key] = reader.pages[idx].extract_text() or ""
+                    return text_cache[text_key]
+
                 if target_pages:
-                    # 只解析目标页码（1-indexed → 0-indexed）
                     indices = sorted(p - 1 for p in target_pages if 1 <= p <= total_pages)
                     text_parts = []
                     for i in indices:
-                        text = reader.pages[i].extract_text() or ""
+                        text = _get_page_text(i)
                         if text.strip():
                             text_parts.append(f"[第 {i + 1} 页]\n{text}")
                     content = '\n\n'.join(text_parts)
@@ -170,17 +197,14 @@ class OriginalDocService:
                         indices = sorted(p - 1 for p in expanded)
                         text_parts = []
                         for i in indices:
-                            text = reader.pages[i].extract_text() or ""
+                            text = _get_page_text(i)
                             if text.strip():
                                 text_parts.append(f"[第 {i + 1} 页]\n{text}")
                         content = '\n\n'.join(text_parts)
 
                     return content if content.strip() else None
                 else:
-                    # 无页码信息时读取全部
-                    text_parts = []
-                    for page in reader.pages:
-                        text_parts.append(page.extract_text())
+                    text_parts = [_get_page_text(i) for i in range(total_pages)]
                     return '\n\n'.join(text_parts)
             except Exception:
                 return None

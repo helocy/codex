@@ -252,12 +252,82 @@ setup_backend() {
     source venv/bin/activate
     pip install --upgrade pip -q
 
-    info "安装 Python 依赖（首次安装 sentence-transformers 需要下载模型，约 500MB，请耐心等待）..."
-    pip install -r requirements.txt -q
+    if [[ "$EMBED_PROVIDER" == "local" ]]; then
+        info "安装 Python 依赖（含 torch + sentence-transformers）..."
+        pip install -r requirements.txt -q
+    else
+        info "安装 Python 依赖（API Embedding，跳过 torch/sentence-transformers）..."
+        grep -vE "^(torch|sentence-transformers)" requirements.txt > /tmp/codex_req.txt
+        pip install -r /tmp/codex_req.txt -q
+        rm -f /tmp/codex_req.txt
+    fi
     pip install "httpx[socks]" rank-bm25 requests beautifulsoup4 -q
 
     success "Python 依赖安装完成"
+
+    # 本地模型：预下载并展示进度
+    if [[ "$EMBED_PROVIDER" == "local" ]]; then
+        echo ""
+        info "预下载本地 Embedding 模型: ${EMBED_MODEL}"
+        echo -e "  ${YELLOW}文件大小约 500MB${NC}"
+        echo -e "  ${YELLOW}预计时间: 10 Mbps 约 7 分钟 | 100 Mbps 约 1 分钟${NC}"
+        echo ""
+        python3 - <<PYEOF
+from sentence_transformers import SentenceTransformer
+import sys
+print("  正在连接 Hugging Face 下载模型文件...")
+sys.stdout.flush()
+try:
+    model = SentenceTransformer("${EMBED_MODEL}")
+    print("  [OK] 模型下载完成，已就绪")
+except Exception as e:
+    print(f"  [WARN] 下载失败: {e}")
+    print("  模型将在首次使用时自动重试下载")
+PYEOF
+        echo ""
+    fi
+
     deactivate
+}
+
+# ── 提前询问 Embedding 类型（setup_backend 前需要知道是否安装 torch）──────────────
+ask_embedding_early() {
+    step "选择 Embedding 模型"
+    echo ""
+    echo -e "  ${BLUE}1)${NC} 本地模型（默认）    — 免费，离线可用，首次下载约 500MB"
+    echo -e "  ${BLUE}2)${NC} 豆包 Embedding      — 2048 维，需要豆包 API Key"
+    echo -e "  ${BLUE}3)${NC} OpenAI 兼容接口      — 如 text-embedding-3-small"
+    echo ""
+    read -p "  请输入选项 [1-3，默认 1]: " _emb_early
+
+    EMBED_MODEL="paraphrase-multilingual-MiniLM-L12-v2"
+    EMBED_PROVIDER="local"
+    EMBED_DIM=384
+    EMBED_NOTE="本地免费模型（paraphrase-multilingual-MiniLM-L12-v2）"
+    EMBED_API_KEY=""
+    EMBED_BASE_URL=""
+
+    case "$_emb_early" in
+      2)
+        EMBED_PROVIDER="doubao"
+        EMBED_NOTE="豆包 Embedding"
+        ask EMBED_MODEL "Embedding 模型名称" "doubao-embedding-vision-251215"
+        EMBED_DIM=2048
+        ask_secret EMBED_API_KEY "豆包 API Key"
+        ;;
+      3)
+        EMBED_PROVIDER="openai"
+        EMBED_NOTE="OpenAI 兼容 Embedding"
+        ask EMBED_MODEL "模型名称" "text-embedding-3-small"
+        ask EMBED_BASE_URL "Base URL" "https://api.openai.com/v1"
+        ask_secret EMBED_API_KEY "API Key"
+        EMBED_DIM=1536
+        ;;
+      *)
+        info "使用本地免费模型"
+        ;;
+    esac
+    success "Embedding 已选择: ${EMBED_NOTE}"
 }
 
 # ── 辅助：带默认值的 read ────────────────────────────────────────────────────────
@@ -375,55 +445,18 @@ setup_env() {
         ;;
     esac
 
-    # ── 第二步：Embedding 模型 ────────────────────────────────────────────────
+    # ── 第二步：Embedding 模型（已在部署前期选择）────────────────────────────
     echo ""
     echo -e "${BOLD}  ┌─────────────────────────────────────────────────────┐${NC}"
-    echo -e "${BOLD}  │  第二步：选择 Embedding 模型                        │${NC}"
+    echo -e "${BOLD}  │  第二步：Embedding 模型                             │${NC}"
     echo -e "${BOLD}  └─────────────────────────────────────────────────────┘${NC}"
     echo ""
-    echo -e "  ${BLUE}1)${NC} 本地模型（默认）    — 免费，离线可用，首次下载约 500MB"
-    echo -e "  ${BLUE}2)${NC} 豆包 Embedding      — 2048 维，需要豆包 API Key"
-    echo -e "  ${BLUE}3)${NC} OpenAI 兼容接口      — 如 text-embedding-3-small"
-    echo ""
-    read -p "  请输入选项 [1-3，默认 1]: " _emb_choice
-
-    EMBED_MODEL="paraphrase-multilingual-MiniLM-L12-v2"
-    EMBED_PROVIDER="local"
-    EMBED_DIM=384
-    EMBED_NOTE="本地免费模型"
-    EMBED_API_KEY=""
-    EMBED_BASE_URL=""
-
-    case "$_emb_choice" in
-      2)
-        EMBED_PROVIDER="doubao"
-        EMBED_NOTE="豆包 Embedding"
-        ask EMBED_MODEL "Embedding 模型名称" "doubao-embedding-vision-251215"
-        EMBED_DIM=2048
-        if [[ -z "$LLM_API_KEY" || "$_choice" != "1" ]]; then
-            ask_secret EMBED_API_KEY "豆包 API Key（如与上方相同可重复输入）"
-        else
-            EMBED_API_KEY="$LLM_API_KEY"
-            info "复用上方豆包 API Key"
-        fi
-        ;;
-      3)
-        EMBED_PROVIDER="openai"
-        EMBED_NOTE="OpenAI 兼容 Embedding"
-        ask EMBED_MODEL "模型名称" "text-embedding-3-small"
-        ask EMBED_BASE_URL "Base URL" "https://api.openai.com/v1"
-        if [[ -z "$LLM_API_KEY" ]]; then
-            ask_secret EMBED_API_KEY "API Key"
-        else
-            EMBED_API_KEY="$LLM_API_KEY"
-            info "复用上方 API Key"
-        fi
-        EMBED_DIM=1536
-        ;;
-      *)
-        EMBED_NOTE="本地免费模型（paraphrase-multilingual-MiniLM-L12-v2）"
-        ;;
-    esac
+    echo -e "  已选择: ${GREEN}${EMBED_NOTE}${NC}"
+    # 豆包 LLM + 豆包 Embedding：如 EMBED_API_KEY 未设置，尝试复用 LLM key
+    if [[ "$EMBED_PROVIDER" == "doubao" && -z "$EMBED_API_KEY" && -n "$LLM_API_KEY" ]]; then
+        EMBED_API_KEY="$LLM_API_KEY"
+        info "复用豆包 LLM API Key 作为 Embedding API Key"
+    fi
 
     # ── 第三步：代码分析 LLM（可选）────────────────────────────────────────
     CODE_PROVIDER=""
@@ -731,6 +764,7 @@ main() {
     detect_os
     install_dependencies
     setup_postgres
+    ask_embedding_early
     setup_backend
     setup_env
     setup_frontend

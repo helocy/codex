@@ -1176,18 +1176,6 @@ function App() {
                   </div>
 
                   <div className="bg-white rounded-2xl p-8 shadow-md">
-                    <div className="flex items-center justify-between mb-5">
-                      <h2 className="text-xl font-bold text-gray-900">{t.languageSwitch}</h2>
-                      <button
-                        onClick={() => switchLanguage(language === 'zh' ? 'en' : 'zh')}
-                        className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        {language === 'zh' ? t.languageEnglish : t.languageChinese}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl p-8 shadow-md">
                     <h2 className="text-xl font-bold text-gray-900 mb-5">{t.configEmbedding}</h2>
                     {dbStats && (
                       <div className="flex items-center gap-3 mb-5 pb-5 border-b border-gray-100">

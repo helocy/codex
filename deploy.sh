@@ -621,13 +621,15 @@ echo "启动后端 http://localhost:8001 ..."
 cd "$BACKEND_DIR"
 if [ -d "venv" ]; then
     source venv/bin/activate
-    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
+    nohup env NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" \
+        python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
         > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
     deactivate
 else
     # 没有 venv，尝试直接使用系统 Python
-    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
+    nohup env NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" \
+        python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
         > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
 fi
@@ -638,7 +640,7 @@ sleep 2
 # 启动前端
 echo "启动前端 http://localhost:5173 ..."
 cd "$FRONTEND_DIR"
-nohup npm run dev > /tmp/frontend.log 2>&1 &
+nohup env NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" npm run dev > /tmp/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo "前端 PID: $FRONTEND_PID"
 

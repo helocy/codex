@@ -67,18 +67,33 @@ class OriginalDocService:
         self._save_config()
         return {'success': True, 'message': '路径移除成功'}
 
-    def find_original_doc(self, title: str, target_pages: Optional[set] = None) -> Optional[str]:
+    def find_original_doc(self, title: str, target_pages: Optional[set] = None,
+                          file_path: Optional[str] = None) -> Optional[str]:
         """
-        根据文档标题在配置的路径中查找原始文档内容
+        根据文档标题查找原始文档内容。
+
+        优先使用 file_path（数据库中记录的上传保存路径）直接命中，
+        路径不存在或读取失败时才 fallback 到配置目录的递归搜索。
 
         Args:
-            title: 文档标题
+            title: 文档标题（用于目录搜索时匹配文件名）
             target_pages: 目标页码集合（1-indexed），仅对 PDF 生效。
                           为 None 时读取全部内容。
+            file_path: 文档在服务器上的保存路径，优先直接读取。
 
         Returns:
             原始文档内容，如果找不到返回 None
         """
+        # 优先直接读取数据库中记录的保存路径（O(1)，无需遍历目录）
+        if file_path and os.path.exists(file_path):
+            ext = os.path.splitext(file_path)[1].lower()
+            try:
+                content = self._read_file(file_path, ext, target_pages)
+                if content:
+                    return content
+            except Exception:
+                pass  # 文件损坏或格式问题，fallback 到目录搜索
+
         if not self.paths:
             return None
 

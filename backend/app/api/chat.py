@@ -245,9 +245,10 @@ async def rag_chat(
             doc_id_counts = Counter(chunk.document_id for chunk, _ in results)
             doc_ids = [doc_id for doc_id, _ in doc_id_counts.most_common(5)]
 
-            # 查询文档标题
+            # 查询文档标题和保存路径
             documents = db.query(Document).filter(Document.id.in_(doc_ids)).all()
             doc_title_map = {doc.id: doc.title for doc in documents}
+            doc_file_path_map = {doc.id: doc.file_path for doc in documents}
 
             # 尝试查找原始文档
             for doc_id in doc_ids:
@@ -274,8 +275,11 @@ async def rag_chat(
                     expanded_pages = None
                     page_info = ""
 
-                # 查找原始文档，PDF 只解析目标页
-                original_content = original_doc_service.find_original_doc(title, target_pages=expanded_pages)
+                # 查找原始文档：优先用 file_path 直接命中，失败再搜索目录
+                saved_path = doc_file_path_map.get(doc_id)
+                original_content = original_doc_service.find_original_doc(
+                    title, target_pages=expanded_pages, file_path=saved_path
+                )
                 if original_content:
                     # 限制原始文档长度，避免超出 token 限制
                     max_length = 8000

@@ -1,10 +1,17 @@
 """
 LLM 服务 - 支持多种大模型提供商
 """
+import os
 from typing import List, Dict, Optional
 import httpx
 from openai import OpenAI
 from app.core.config import settings
+
+# 修正 socks:// 为 socks5://，httpx 不认识 socks://
+for _v in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+    _val = os.environ.get(_v)
+    if _val and "socks://" in _val:
+        os.environ[_v] = _val.replace("socks://", "socks5://")
 
 
 class LLMService:

@@ -195,6 +195,16 @@ Add local folder paths in the "Config" page. The system will search these paths 
 
 ## 📝 Changelog
 
+### v0.7.0 (2026-04-02)
+
+- Memory optimization: free Python float lists after building numpy embedding matrix, reducing RSS from 4.4 GB to ~1.1 GB
+- Two-level PDF cache: L1 caches PdfReader objects, L2 caches extracted page text; repeated access requires no re-parsing
+- Original document lookup now uses the database-stored file path directly (O(1)) instead of directory scanning (was 4.75s)
+- Fixed admin stats/delete endpoints crashing due to VACUUM inside a transaction aborting the PostgreSQL session
+- Fixed login hang in proxy environments: added NO_PROXY to both start.sh and deploy.sh-generated startup scripts
+- Fixed socks:// proxy scheme incompatibility with httpx; auto-normalizes to socks5://
+- Deploy optimization: skip torch (~2 GB) install when using API embedding; pre-download local model with progress display
+
 ### v0.6.0 (2026-03-30)
 
 - User management merged into config page as a dedicated "Users" sub-tab; removed the standalone top-level tab

@@ -258,7 +258,7 @@ export const translations: Record<Language, Translations> = {
 
     thinkingProcess: '思考过程',
 
-    footerText: 'Codex v0.6.0 · 基于本地 AI 的智能笔记系统 · by Zhichao',
+    footerText: 'Codex v0.7.0 · 基于本地 AI 的智能笔记系统 · by Zhichao',
 
     fileTypeMarkdown: '📝 Markdown',
     fileTypePdf: '📄 PDF',
@@ -389,7 +389,7 @@ export const translations: Record<Language, Translations> = {
 
     thinkingProcess: 'Thinking Process',
 
-    footerText: 'Codex v0.6.0 · Local AI-powered Knowledge Base · by Zhichao',
+    footerText: 'Codex v0.7.0 · Local AI-powered Knowledge Base · by Zhichao',
 
     fileTypeMarkdown: '📝 Markdown',
     fileTypePdf: '📄 PDF',

@@ -68,6 +68,10 @@ class _EmbeddingCache:
         self._matrix = matrix
         self._norms = norms
         self._chunk_ids = [c.id for c in chunks]
+        # Free Python list embeddings from chunk objects after copying to numpy matrix.
+        # Saves ~7 GB for 142K chunks × 2048-dim (Python float lists vs float32 matrix).
+        for c in chunks:
+            c.embedding = None
         self._chunks = chunks
         return self._matrix, self._norms, self._chunks
 

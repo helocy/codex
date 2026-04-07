@@ -178,7 +178,7 @@ function App() {
     loadDocuments();
   }, []);
 
-  // 管理员登录时：关闭用户设置弹窗 + 同步 LLM 配置到服务端
+  // 管理员登录时：切换到配置页 + 关闭用户设置弹窗 + 同步 LLM 配置到服务端
   useEffect(() => {
     if (!isAdmin) return;
     setShowUserSettings(false);
@@ -842,7 +842,7 @@ function App() {
               >
                 {language === 'zh' ? 'EN' : '中文'}
               </button>
-              <button onClick={logout} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg">
+              <button onClick={() => { logout(); setMode('chat'); }} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded-lg">
                 {language === 'zh' ? '退出' : 'Logout'}
               </button>
             </div>

@@ -16,6 +16,7 @@ router = APIRouter()
 class LoginRequest(BaseModel):
     username: str
     password: str
+    remember_me: bool = False
 
 
 class CreateUserRequest(BaseModel):
@@ -42,8 +43,9 @@ def hash_password(password: str) -> str:
     return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
 
-def create_access_token(username: str, role: str) -> str:
-    expire = datetime.utcnow() + timedelta(days=settings.ACCESS_TOKEN_EXPIRE_DAYS)
+def create_access_token(username: str, role: str, expire_days: int | None = None) -> str:
+    days = expire_days if expire_days is not None else settings.ACCESS_TOKEN_EXPIRE_DAYS
+    expire = datetime.utcnow() + timedelta(days=days)
     payload = {"sub": username, "role": role, "exp": expire}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
@@ -65,7 +67,8 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username).first()
     if not user or not user.is_active or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    token = create_access_token(user.username, user.role)
+    expire_days = 30 if req.remember_me else None
+    token = create_access_token(user.username, user.role, expire_days=expire_days)
     return {"access_token": token, "token_type": "bearer", "id": user.id, "username": user.username, "role": user.role}
 
 

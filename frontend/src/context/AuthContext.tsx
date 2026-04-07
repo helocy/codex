@@ -10,7 +10,7 @@ interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => void;
   updateSession: (newToken: string, newUsername: string) => void;
   isAdmin: boolean;
@@ -45,8 +45,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => logout());
   }, [token, logout]);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const r = await api.post('/auth/login', { username, password });
+  const login = useCallback(async (username: string, password: string, rememberMe?: boolean) => {
+    const r = await api.post('/auth/login', { username, password, remember_me: !!rememberMe });
     const { access_token, id, username: uname, role } = r.data;
     localStorage.setItem(TOKEN_KEY, access_token);
     setToken(access_token);

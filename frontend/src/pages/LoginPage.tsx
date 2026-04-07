@@ -9,6 +9,7 @@ export default function LoginPage({ onClose }: Props) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +18,7 @@ export default function LoginPage({ onClose }: Props) {
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, rememberMe);
       onClose();
     } catch (err: any) {
       setError(err.response?.data?.detail || '登录失败');
@@ -52,6 +53,15 @@ export default function LoginPage({ onClose }: Props) {
               required
             />
           </div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+              className="w-3.5 h-3.5 accent-gray-900"
+            />
+            <span className="text-xs text-gray-500">保持登录 30 天</span>
+          </label>
           {error && <p className="text-red-500 text-xs">{error}</p>}
           <div className="flex gap-2 pt-1">
             <button
